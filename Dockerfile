@@ -16,6 +16,6 @@ VOLUME ["/data"]
 EXPOSE 8300
 
 HEALTHCHECK --interval=60s --timeout=5s --start-period=10s \
-  CMD python -c "import urllib.request,os;p=os.environ.get('FUTU_PORT','8300');urllib.request.urlopen(f'http://127.0.0.1:{p}/',timeout=3)"
+  CMD ["python", "-m", "app.healthcheck"]
 
 CMD ["python", "-m", "app.web"]
