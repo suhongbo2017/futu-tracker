@@ -1,0 +1,27 @@
+# 遵循服务器既有惯例：/home/docker/<service>/docker-compose.yml
+services:
+  futu-tracker:
+    build: .
+    image: futu-tracker:latest
+    container_name: futu-tracker
+    restart: unless-stopped
+    ports:
+      - "8300:8300"
+    volumes:
+      - ./data:/data
+    environment:
+      - TZ=Asia/Shanghai
+      - FUTU_DB=/data/futu.db
+      - FUTU_PORT=8300
+      - FUTU_USER=${FUTU_USER:-admin}
+      - FUTU_PASSWORD=${FUTU_PASSWORD:?必须设置 FUTU_PASSWORD}
+      - FEISHU_WEBHOOK=${FEISHU_WEBHOOK:-}
+      - FEISHU_SECRET=${FEISHU_SECRET:-}
+      - FUTU_BRIEF_HOUR=${FUTU_BRIEF_HOUR:-7}
+      - FUTU_BRIEF_MINUTE=${FUTU_BRIEF_MINUTE:-30}
+      - FUTU_XCHECK_PCT=${FUTU_XCHECK_PCT:-0.5}
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
