@@ -68,13 +68,24 @@ def build_daily_brief(date, rows, totals, conflicts=None, top_n=3):
     pct = totals.get("unrealized_pct")
     parts.append(f"浮动盈亏 {'+' if up >= 0 else ''}{up:,.2f} USD"
                  + (f" ({pct:+.2f}%)" if pct is not None else ""))
+    realized = totals.get("realized_pnl") or 0.0
+    if abs(realized) > 0.005:
+        parts.append(f"已实现盈亏 {'+' if realized >= 0 else ''}{realized:,.2f} USD")
+        total = up + realized
+        parts.append(f"总盈亏 {'+' if total >= 0 else ''}{total:,.2f} USD")
     if totals.get("day_change_pct") is not None:
         parts.append(f"较前一交易日 {totals['day_change_pct']:+.2f}%")
     parts.append("")
-    parts.append(f"🟢 最佳 {len(held[:top_n])} 只：")
+    parts.append(f"🟢 持仓最佳 {len(held[:top_n])} 只：")
     parts += ["  " + line(r) for r in held[:top_n]]
-    parts.append(f"🔴 最差 {len(held[-top_n:])} 只：")
+    parts.append(f"🔴 持仓最差 {len(held[-top_n:])} 只：")
     parts += ["  " + line(r) for r in held[-top_n:][::-1]]
+    closed = [r for r in rows if not r.get("qty") and abs(r.get("realized_pnl") or 0) > 0.005]
+    if closed:
+        parts.append("")
+        parts.append(f"💵 已清仓 {len(closed)} 只：")
+        for r in sorted(closed, key=lambda x: x["realized_pnl"]):
+            parts.append(f"  {r.get('name') or r['code']} 已实现 {r['realized_pnl']:+,.2f} USD")
     if conflicts:
         parts.append("")
         parts.append(f"⚠️ 数据源分歧 {len(conflicts)} 条（价差 >{config.CROSS_CHECK_TOLERANCE_PCT}%）")
