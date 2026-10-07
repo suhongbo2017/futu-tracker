@@ -21,6 +21,9 @@ UA = {"User-Agent": "Mozilla/5.0 (futu-tracker)"}
 _last_request = [0.0]
 
 
+import math
+
+
 class SourceError(RuntimeError):
     pass
 
@@ -42,15 +45,17 @@ def _get(url, headers=None, encoding="gbk"):
 
 
 def to_symbol(code):
-    """US.NFLX -> NFLX"""
-    return code.split(".")[-1].strip().upper()
+    """内部代码 -> 交易所符号：US.AAPL -> AAPL；US.BRK.B -> BRK.B（仅去前缀，不取尾段）。"""
+    c = (code or "").strip().upper()
+    return c[3:] if c.startswith("US.") else c
 
 
 def _f(x):
     try:
-        return float(x)
+        v = float(x)
     except (TypeError, ValueError):
         return None
+    return v if math.isfinite(v) else None        # 拒绝 NaN/Inf 污染行情库
 
 
 # --------------------------------------------------------------------------

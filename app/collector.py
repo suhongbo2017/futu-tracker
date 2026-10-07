@@ -24,6 +24,11 @@ from .accounting import compute_positions, mark_to_market, portfolio_totals
 # --------------------------------------------------------------------------
 # 美股交易日判定
 # --------------------------------------------------------------------------
+def ny_now():
+    """美东当前时间（naive datetime）；时区数据缺失时回退系统本地时间。"""
+    return dt.datetime.now(_NY) if _NY else dt.datetime.now()
+
+
 def us_session_date(quote):
     """从数据源时间戳推导"美股交易日"。优先用源给的时间，避免时区/夏令时判断出错。"""
     qt = (quote or {}).get("quote_time") or ""
@@ -88,6 +93,7 @@ def collect_quotes(conn):
         raise
 
     saved, skipped = 0, []
+    sym2code = {inst["symbol"]: inst["code"] for inst in insts}   # 冲突记录用内部代码
     with db.tx(conn):
         for inst in insts:
             sym = inst["symbol"]
@@ -114,7 +120,7 @@ def collect_quotes(conn):
             conn.execute(
                 """INSERT INTO source_conflicts(code, date, price_a, source_a, price_b, source_b, diff_pct)
                    VALUES (?,?,?,?,?,?,?)""",
-                (c["symbol"], c.get("date") or us_session_date({}), c["price_a"], c["source_a"],
+                (sym2code.get(c["symbol"], c["symbol"]), c.get("date") or us_session_date({}), c["price_a"], c["source_a"],
                  c["price_b"], c["source_b"], c["diff_pct"]),
             )
 
@@ -139,8 +145,8 @@ def collect_history(conn):
                 fail.append(f"{inst['symbol']}:{type(e).__name__}")
                 continue
             for b in bars:
-                if not b.get("date"):
-                    continue
+                if not b.get("date") or not b.get("close") or b["close"] <= 0:
+                    continue                   # 停牌/无效行不入库，避免污染最新价
                 db.upsert_quote(conn, inst["code"], b["date"], b["open"], b["high"],
                                 b["low"], b["close"], b["volume"], b["source"], 1)
             ok += 1

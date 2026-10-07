@@ -58,13 +58,17 @@ def build_daily_brief(date, rows, totals, conflicts=None, top_n=3):
 
     def line(r):
         sign = "+" if (r.get("unrealized_pnl") or 0) >= 0 else ""
+        last = r.get("last")
+        pnl = r.get("unrealized_pnl")
+        last_s = f"{last:,.2f}" if last is not None else "-"    # 无行情时显示 -
+        pnl_s = f"{sign}{pnl:,.2f}" if pnl is not None else "-"
         return (f"{r.get('name') or r['code']}({r['code'].split('.')[-1]}) "
-                f"{r['last']:.2f} | 浮盈 {sign}{r['unrealized_pnl']:.2f} USD")
+                f"{last_s} | 浮盈 {pnl_s} USD")
 
     parts = [f"📈 持仓1 收盘简报 {date}", ""]
     parts.append(f"市值 {totals['market_value']:,.2f} USD")
     parts.append(f"成本 {totals['cost_basis']:,.2f} USD")
-    up = totals["unrealized_pnl"]
+    up = totals.get("unrealized_pnl") or 0.0
     pct = totals.get("unrealized_pct")
     parts.append(f"浮动盈亏 {'+' if up >= 0 else ''}{up:,.2f} USD"
                  + (f" ({pct:+.2f}%)" if pct is not None else ""))

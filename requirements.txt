@@ -1,3 +1,2 @@
-fastapi
-uvicorn[standard]
-jinja2
+# futu-tracker 零第三方运行时依赖：Web/调度/采集全部基于 Python 标准库实现。
+# pytest 仅用于开发与 CI 测试：python -m pip install pytest

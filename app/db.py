@@ -63,6 +63,26 @@ def run_finish(conn, run_id, status, message=""):
 
 
 # ---------- instruments ----------
+def ensure_instrument(conn, code, name=None):
+    """确保标的存在；不存在时自动注册（Web 手工录入新代码时调用）。
+    - symbol 取代码尾段并大写（"US.AAPL" -> "AAPL"），保证采集端能匹配行情键；
+    - 已存在的标的原样保留，避免覆盖采集器写入的真实名称；
+    - 单条 INSERT ... ON CONFLICT DO NOTHING 消除并发注册竞态。"""
+    symbol = code.split(".")[-1].strip().upper()
+    conn.execute(
+        """INSERT INTO instruments(code, symbol, name, market, currency)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(code) DO NOTHING""",
+        (code, _symbol_of(code), name or _symbol_of(code), "US", "USD"),
+    )
+
+
+def _symbol_of(code):
+    """内部代码 -> 交易所符号：US.AAPL -> AAPL；US.BRK.B -> BRK.B（仅去前缀，不取尾段）。"""
+    c = code.strip().upper()
+    return c[3:] if c.startswith("US.") else c
+
+
 def upsert_instrument(conn, code, symbol, name, market="US", currency="USD"):
     conn.execute(
         """INSERT INTO instruments(code, symbol, name, market, currency)
@@ -137,7 +157,7 @@ def backup(dest_dir=None, keep=7, conn=None):
     import glob
     dest_dir = dest_dir or os.path.join(config.DATA_DIR, "backups")
     os.makedirs(dest_dir, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]   # 毫秒粒度，避免同秒重名
     dest = os.path.join(dest_dir, f"futu_{stamp}.db")
     own = conn is None
     conn = conn or connect()

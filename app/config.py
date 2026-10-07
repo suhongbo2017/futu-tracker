@@ -11,8 +11,7 @@ DB_PATH = _env("FUTU_DB", "/data/futu.db")
 STOCKS_FILE = _env("FUTU_STOCKS_FILE", "")          # 可选：从旧 stocks.txt 播种
 DATA_DIR = os.path.dirname(DB_PATH) or "."
 
-# 时区与调度（美股收盘：北京 04:00 夏令时 / 05:00 冬令时）
-TZ = _env("FUTU_TZ", "Asia/Shanghai")
+# 时区与调度（美股收盘：北京 04:00 夏令时 / 05:00 冬令时；时区由容器 TZ 环境变量控制）
 BRIEF_HOUR = int(_env("FUTU_BRIEF_HOUR", "7"))      # 收盘后简报小时（北京时间）
 BRIEF_MINUTE = int(_env("FUTU_BRIEF_MINUTE", "30"))
 

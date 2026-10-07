@@ -83,7 +83,7 @@ def mark_to_market(positions, prices):
         row = dict(pos)
         row["code"] = code
         row["last"] = last
-        if last and pos["qty"]:
+        if last is not None and pos["qty"]:    # 价格恰为 0 也算有行情
             row["market_value"] = pos["qty"] * last
             row["unrealized_pnl"] = (last - pos["avg_cost"]) * pos["qty"]
             row["unrealized_pct"] = ((last / pos["avg_cost"] - 1) * 100) if pos["avg_cost"] else None

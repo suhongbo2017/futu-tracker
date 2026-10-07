@@ -89,9 +89,3 @@ CREATE TABLE IF NOT EXISTS source_conflicts (
     diff_pct  REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-
--- ---------- 键值配置 ----------
-CREATE TABLE IF NOT EXISTS settings (
-    k TEXT PRIMARY KEY,
-    v TEXT
-);

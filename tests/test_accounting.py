@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """账务引擎单元测试：口径红线必须被证明。
 
-运行：  python -m unittest discover -s tests -v
+运行：  python -m pytest tests/ -q   （pytest 兼容 unittest.TestCase 风格）
 """
 import sys
 import os
