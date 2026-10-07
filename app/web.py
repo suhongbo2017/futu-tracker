@@ -172,8 +172,8 @@ def page_tx(conn, msg="", err=""):
     opts = "".join(f'<option value="{html.escape(i["code"])}">{html.escape(i["code"])} · {html.escape(i["name"])}</option>' for i in insts)
     now = dt.datetime.now().strftime("%Y-%m-%dT%H:%M")
     form = f"""<form method="post" action="/tx">
-<div><label>标的</label><input name="code" list="codes" placeholder="如 NVDA / US.AAPL" required style="width:200px">
-<datalist id="codes">{opts}</datalist><span class="small">可输入已有代码或新代码</span></div>
+<div><label>标的</label><input name="code" list="codes" placeholder="如 US.AAPL 或 AAPL" required style="width:200px">
+<datalist id="codes">{opts}</datalist><span class="small">选已有代码，或直接输入新代码（将自动注册为 US.XXX）</span></div>
 <div><label>方向</label><select name="side">
   <option value="BUY">买入 BUY</option><option value="SELL">卖出 SELL</option>
   <option value="DIV">分红 DIV</option><option value="FEE">费用 FEE</option>
@@ -189,7 +189,14 @@ def page_tx(conn, msg="", err=""):
     txns = list(conn.execute(
         "SELECT t.*, i.name FROM transactions t LEFT JOIN instruments i ON i.code=t.code "
         "ORDER BY t.trade_time DESC, t.id DESC LIMIT 40"))
-    body = [form, '<table><thead><tr><th>时间</th><th>标的</th><th>方向</th><th>价格</th><th>股数</th>'
+    body = [f"""<details class="card" style="margin:0 0 14px" open>
+<summary style="cursor:pointer;font-size:15px;color:#4f6e4d">➕ 新增标的（也可在下方记账单直接输入新代码，提交时自动注册）</summary>
+<form method="post" action="/instrument" style="border:0;background:none;padding:0">
+<div><label>代码</label><input name="code" placeholder="如 US.AAPL 或 AAPL" required style="width:160px"></div>
+<div><label>名称（可选，采集到行情后自动补真实名称）</label><input name="name" style="width:220px"></div>
+<button type="submit">新增标的</button>
+</form></details>
+""", form, '<table><thead><tr><th>时间</th><th>标的</th><th>方向</th><th>价格</th><th>股数</th>'
                 '<th>手续费</th><th>备注</th><th>操作</th></tr></thead><tbody>']
     for t in txns:
         body.append(
@@ -394,6 +401,19 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     return self._redirect("/tx", f"❌ 写入失败：{e}")
                 return self._redirect("/tx", f"✅ 已记录 {side} {code}")
+
+            if self.path == "/instrument":
+                code = normalize_code(g("code"))
+                if code is None:
+                    return self._redirect("/tx", "❌ 标的代码格式无效（字母/数字，如 US.AAPL）")
+                name = g("name") or None
+                exists = conn.execute("SELECT 1 FROM instruments WHERE code=?", (code,)).fetchone()
+                if exists:
+                    return self._redirect("/tx", f"⚠️ 标的 {code} 已存在，无需重复新增")
+                with db.tx(conn):
+                    db.ensure_instrument(conn, code, name=name)
+                msg = f"✅ 已新增标的 {code}" + (f"（{name}）" if name else "")
+                return self._redirect("/tx", msg)
 
             if self.path == "/tx/reverse":
                 tid = g("id")
