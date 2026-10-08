@@ -62,6 +62,28 @@ python -m app.collector --all        # 以上全部执行
 docker compose up -d --build         # 或容器部署（./data 挂载为 /data）
 ```
 
+## 部署与更新（服务器）
+
+首次部署：
+
+```bash
+git clone https://github.com/suhongbo2017/futu-tracker.git
+cd futu-tracker
+echo 'FUTU_PASSWORD=你的密码' >> .env        # 必填，其余变量可选（见上表）
+docker compose up -d --build
+```
+
+日常更新（代码只走 Git，数据库与配置不受影响）：
+
+```bash
+git pull
+# 或 git reset --hard origin/master（丢弃本地代码改动时）
+docker compose up -d --build     # 自动重建容器，./data 数据卷与 .env 配置原样保留
+```
+
+> 注意：仓库为 public，部署机仅凭 Basic 鉴权，请勿将 8300 端口暴露到公网；
+> `docker-compose.yml` 属于代码仓库，个性化配置请写入 `.env`（在 `.gitignore` 中），避免被更新覆盖。
+
 ## 记账与标的
 
 - **新增标的**：记账页顶部「➕ 新增标的」可主动注册（代码 + 可选名称；采集到行情后自动补真实名称）；也可直接在记账单「标的」框输入新代码提交，自动注册并记账。
