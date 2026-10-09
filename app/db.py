@@ -62,13 +62,22 @@ def run_finish(conn, run_id, status, message=""):
     conn.commit()
 
 
+def has_successful_run(conn, kind, date):
+    """判断某任务在指定本地日期是否已有成功记录。"""
+    row = conn.execute(
+        "SELECT 1 FROM runs WHERE kind=? AND status='ok' AND started_at LIKE ? LIMIT 1",
+        (kind, f"{date}%"),
+    ).fetchone()
+    return row is not None
+
+
 # ---------- instruments ----------
 def ensure_instrument(conn, code, name=None):
     """确保标的存在；不存在时自动注册（Web 手工录入新代码时调用）。
-    - symbol 取代码尾段并大写（"US.AAPL" -> "AAPL"），保证采集端能匹配行情键；
+    - symbol 只剥离 US. 前缀（"US.AAPL" -> "AAPL"），兼容 BRK.B；
     - 已存在的标的原样保留，避免覆盖采集器写入的真实名称；
     - 单条 INSERT ... ON CONFLICT DO NOTHING 消除并发注册竞态。"""
-    symbol = code.split(".")[-1].strip().upper()
+    symbol = _symbol_of(code)
     conn.execute(
         """INSERT INTO instruments(code, symbol, name, market, currency)
            VALUES (?,?,?,?,?)
@@ -163,15 +172,17 @@ def backup(dest_dir=None, keep=7, conn=None):
     conn = conn or connect()
     try:
         conn.execute("VACUUM INTO ?", (dest,))       # 无需停服，结果一致
+        size = os.path.getsize(dest)
     finally:
         if own:
             conn.close()
     files = sorted(glob.glob(os.path.join(dest_dir, "futu_*.db")))
     removed = []
-    for f in files[:-keep] if keep > 0 else []:
+    stale = files[:-keep] if keep > 0 else files
+    for f in stale:
         try:
             os.remove(f); removed.append(os.path.basename(f))
         except OSError:
             pass
-    return {"path": dest, "size": os.path.getsize(dest), "removed": removed,
+    return {"path": dest, "size": size, "removed": removed,
             "kept": len(files) - len(removed)}

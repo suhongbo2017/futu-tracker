@@ -101,10 +101,16 @@ def portfolio_totals(rows):
     cost_basis = sum(r["cost_basis"] or 0.0 for r in rows)
     unrealized = sum(r["unrealized_pnl"] or 0.0 for r in rows)
     realized = sum(r["realized_pnl"] or 0.0 for r in rows)
+    missing_price_count = sum(1 for r in rows if r.get("qty") and not r.get("has_price", r.get("last") is not None))
+    held_count = sum(1 for r in rows if r.get("qty"))
     return {
         "market_value": market_value,
         "cost_basis": cost_basis,
         "unrealized_pnl": unrealized,
         "realized_pnl": realized,
         "unrealized_pct": (unrealized / cost_basis * 100) if cost_basis else None,
+        "missing_price_count": missing_price_count,
+        "held_count": held_count,
+        "price_coverage_pct": ((held_count - missing_price_count) / held_count * 100)
+                              if held_count else None,
     }

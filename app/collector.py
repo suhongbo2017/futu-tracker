@@ -98,7 +98,7 @@ def collect_quotes(conn):
         for inst in insts:
             sym = inst["symbol"]
             q = quotes.get(sym)
-            if not q or not q.get("last"):
+            if not q or q.get("last") is None:
                 skipped.append(sym)
                 continue
             d = us_session_date(q)
@@ -157,24 +157,35 @@ def collect_history(conn):
 
 
 def snapshot(conn, date=None):
-    """按库内最新收盘价生成组合快照与汇总。"""
-    insts = db.list_instruments(conn)
+    """按统一估值日生成组合快照，避免混用不同交易日的价格。"""
+    insts = {i["code"]: i for i in db.list_instruments(conn)}
     txns = db.all_transactions(conn)
     if not txns:
         return {"status": "skipped", "message": "无流水，跳过快照"}
 
-    prices, used_date = {}, None
-    for inst in insts:
-        q = db.quote_on(conn, inst["code"], date) if date else db.latest_quote(conn, inst["code"])
-        if q:
-            prices[inst["code"]] = q["close"]
-            used_date = max(used_date or q["date"], q["date"])
-    if not prices:
+    positions = compute_positions(txns)
+    latest_dates = []
+    for code, pos in positions.items():
+        if not pos.get("qty"):
+            continue
+        q = db.quote_on(conn, code, date) if date else db.latest_quote(conn, code)
+        if q and q.get("date"):
+            latest_dates.append(q["date"])
+    if not latest_dates:
         return {"status": "failed", "message": "库内无任何行情，无法生成快照"}
 
-    positions = compute_positions(txns)
+    used_date = date or min(latest_dates)
+    prices = {}
+    for code, pos in positions.items():
+        if not pos.get("qty"):
+            continue
+        q = db.quote_on(conn, code, used_date)
+        if q and q.get("close") is not None:
+            prices[code] = q["close"]
+
     rows = mark_to_market(positions, prices)
     totals = portfolio_totals(list(rows.values()))
+    missing = totals.get("missing_price_count") or 0
 
     run_id = db.run_start(conn, "snapshot")
     with db.tx(conn):
@@ -205,8 +216,10 @@ def snapshot(conn, date=None):
             (used_date, totals["market_value"], totals["cost_basis"],
              totals["unrealized_pnl"], totals["realized_pnl"], day_pct),
         )
-    db.run_finish(conn, run_id, "ok", f"date={used_date} 市值={totals['market_value']:.2f}")
-    totals.update({"status": "ok", "date": used_date, "rows": rows})
+    status = "partial" if missing else "ok"
+    db.run_finish(conn, run_id, status,
+                  f"date={used_date} 市值={totals['market_value']:.2f} 缺行情={missing}")
+    totals.update({"status": status, "date": used_date, "rows": rows})
     return totals
 
 

@@ -17,6 +17,7 @@ import datetime as dt
 import hmac
 import html
 import json
+import math
 import os
 import re
 import threading
@@ -134,6 +135,10 @@ def page_index(conn, msg="", err=""):
 <div class="card"><div class="k">已实现盈亏</div><div class="v {_cls(totals['realized_pnl'])}">{'+' if (totals['realized_pnl'] or 0)>=0 else ''}{_fmt(totals['realized_pnl'])} <span class="small">USD</span></div></div>
 <div class="card"><div class="k">行情日期</div><div class="v">{html.escape(str(latest))} <span class="small">{'盘中暂定' if prov else '收盘正式'}</span></div></div></div>"""
 
+    coverage_note = ""
+    if totals.get("missing_price_count"):
+        coverage_note = (f'<p class="err">行情不完整：{totals["missing_price_count"]} / '
+                         f'{totals["held_count"]} 只持仓缺少价格；总市值和浮盈可能偏低。</p>')
     body = ['<table><thead><tr>'
             '<th>代码</th><th>名称</th><th>现价</th><th>数量</th><th>均价</th>'
             '<th>市值</th><th>浮动盈亏</th><th>盈亏%</th><th>已实现</th><th>行情日</th>'
@@ -164,7 +169,7 @@ def page_index(conn, msg="", err=""):
                     f"<td class='small'>{html.escape(r['started_at'])}</td>"
                     f"<td class='small'>{html.escape((r['message'] or '')[:80])}</td></tr>")
     body.append("</tbody></table>")
-    return layout("总览", cards + "".join(body), msg, err)
+    return layout("总览", cards + coverage_note + "".join(body), msg, err)
 
 
 def page_tx(conn, msg="", err=""):
@@ -264,12 +269,30 @@ def page_history(conn, date=None, msg="", err=""):
 # 输入规范化与校验（供 /tx 录入与测试复用）
 # --------------------------------------------------------------------------
 def normalize_code(raw):
-    """标的代码规范化：去空白、大写；统一补 US. 前缀（US.AAPL / AAPL / brk.b 均归一）。
-    含非法字符返回 None。"""
+    """标的代码规范化：去空白、大写；统一补 US. 前缀。
+    代码由字母/数字和单个分隔点组成，例如 AAPL、BRK.B、US.AAPL。"""
     code = (raw or "").strip().upper()
-    if not re.fullmatch(r"[A-Z0-9][A-Z0-9.]*", code):
+    if not re.fullmatch(r"[A-Z0-9]+(?:\.[A-Z0-9]+)*", code):
         return None
-    return code if code.startswith("US.") else "US." + code
+    if code.startswith("US."):
+        if code[3:].startswith("US."):
+            return None
+        return code
+    return "US." + code
+
+
+def _normalize_trade_time(raw):
+    """校验并统一成交时间为 YYYY-MM-DDTHH:MM:SS。"""
+    value = (raw or "").strip()
+    if not value:
+        return None
+    value = value.replace(" ", "T")
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return dt.datetime.strptime(value, fmt).isoformat(timespec="seconds")
+        except ValueError:
+            continue
+    return None
 
 
 def _available_qty(conn, code, trade_time):
@@ -300,7 +323,8 @@ class Handler(BaseHTTPRequestHandler):
             u, p = base64.b64decode(hdr[6:]).decode("utf-8").split(":", 1)
         except Exception:
             return False
-        return u == config.AUTH_USER and p == config.AUTH_PASSWORD
+        return (hmac.compare_digest(u.encode("utf-8"), config.AUTH_USER.encode("utf-8"))
+                and hmac.compare_digest(p.encode("utf-8"), config.AUTH_PASSWORD.encode("utf-8")))
 
     def _deny(self):
         self.send_response(401)
@@ -341,7 +365,14 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/tx":
                 return self._send(page_tx(conn, msg=msg))
             if u.path == "/history":
-                return self._send(page_history(conn, (q.get("date") or [None])[0], msg=msg))
+                history_date = (q.get("date") or [None])[0]
+                if history_date:
+                    try:
+                        dt.date.fromisoformat(history_date)
+                    except ValueError:
+                        return self._send(page_history(conn, msg=msg,
+                                                        err="日期格式应为 YYYY-MM-DD"))
+                return self._send(page_history(conn, history_date, msg=msg))
             if u.path == "/api/positions":
                 rows, totals = current_view(conn)
                 return self._send(json.dumps({"totals": totals, "positions": rows},
@@ -375,23 +406,34 @@ class Handler(BaseHTTPRequestHandler):
                     fee = float(g("fee") or 0)
                 except ValueError:
                     return self._redirect("/tx", "❌ 价格/股数/手续费必须是数字")
+                if not all(math.isfinite(v) for v in (price, qty, fee)):
+                    return self._redirect("/tx", "❌ 价格/股数/手续费必须是有限数字")
                 if not code or side not in ("BUY", "SELL", "DIV", "FEE", "ADJ"):
                     return self._redirect("/tx", "❌ 标的或方向无效")
+                if fee < 0:
+                    return self._redirect("/tx", "❌ 手续费不能为负")
                 if side in ("BUY", "SELL") and (price <= 0 or qty <= 0):
                     return self._redirect("/tx", "❌ 买入/卖出必须填写价格与股数")
-                if side in ("DIV", "FEE") and price < 0:
-                    return self._redirect("/tx", f"❌ {side} 金额不能为负")
+                if side in ("DIV", "FEE") and (price < 0 or qty != 0):
+                    return self._redirect("/tx", f"❌ {side} 只填写非负金额，股数必须为 0")
                 if side == "ADJ" and qty == 0:
                     return self._redirect("/tx", "❌ 拆合股股数变化不能为 0")
                 trade_time = g("trade_time") or None
-                if trade_time and not re.match(
-                        r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$", trade_time):
-                    return self._redirect("/tx", "❌ 成交时间格式应为 YYYY-MM-DDTHH:MM")
+                if trade_time:
+                    normalized_time = _normalize_trade_time(trade_time)
+                    if normalized_time is None:
+                        return self._redirect("/tx", "❌ 成交时间不是有效的 YYYY-MM-DDTHH:MM")
+                    trade_time = normalized_time
                 if side == "SELL":
                     avail = _available_qty(conn, code, trade_time)
                     if qty > avail + 1e-9:
                         return self._redirect("/tx",
                             f"❌ 卖出 {qty:g} 股超过当前持仓 {avail:g} 股（不支持卖空）")
+                if side == "ADJ" and qty < 0:
+                    avail = _available_qty(conn, code, trade_time)
+                    if avail + qty < -1e-9:
+                        return self._redirect("/tx",
+                            f"❌ 调整后持仓不能为负（当前 {avail:g} 股）")
                 try:
                     with db.tx(conn):
                         db.ensure_instrument(conn, code)     # 新代码自动注册，避免外键失败
@@ -425,6 +467,8 @@ class Handler(BaseHTTPRequestHandler):
                 if conn.execute("SELECT 1 FROM transactions WHERE reverses_id=?",
                                 (int(tid),)).fetchone():
                     return self._redirect("/tx", f"❌ 流水 #{tid} 已被冲正，不可重复冲正")
+                if orig["reverses_id"] is not None:
+                    return self._redirect("/tx", "❌ 不能冲正一笔冲正流水，请直接检查原始流水")
                 with db.tx(conn):
                     conn.execute(
                         """INSERT INTO transactions(code, side, price, qty, fee, trade_time, note, source, reverses_id)
@@ -443,10 +487,8 @@ class Handler(BaseHTTPRequestHandler):
 # 内置调度器（采集 + 收盘简报）
 # --------------------------------------------------------------------------
 def scheduler_loop(stop_evt):
-    last_quote_min = -1
-    brief_sent_for = None
-    brief_retry_slot = -1
-    backup_done_for = None
+    last_quote_min = None
+    brief_retry_slot = None
     while not stop_evt.is_set():
         try:
             now = dt.datetime.now()
@@ -458,30 +500,36 @@ def scheduler_loop(stop_evt):
                 ny = ny_now()
                 if is_trading_day(ny.date().isoformat()) \
                         and not market_closed(ny.date().isoformat()) \
-                        and ny.minute // 30 != last_quote_min:
-                    last_quote_min = ny.minute // 30
+                        and (ny.date().isoformat(), ny.minute // 30) != last_quote_min:
+                    last_quote_min = (ny.date().isoformat(), ny.minute // 30)
                     r = collect_quotes(conn)
                     print("[sched] quotes:", r.get("message"), flush=True)
                     if r.get("status") != "ok" and config.ALERT_ON_FAILURE:
                         notify.send_text(notify.build_failure_alert("collect_quotes", r.get("message", "")))
                 # 每日备份（账本不可再生）：简报前一小时
+                backup_date = now.date().isoformat()
                 if now.hour == max(config.BRIEF_HOUR - 1, 0) and now.minute >= 30 \
-                        and backup_done_for != now.date():
-                    backup_done_for = now.date()
+                        and not db.has_successful_run(conn, "backup", backup_date):
+                    run_id = db.run_start(conn, "backup")
                     try:
                         info = db.backup(conn=conn, keep=config.BACKUP_KEEP)
-                        print("[sched] backup:", info["path"], info["size"], "B",
-                              "removed=", len(info["removed"]), flush=True)
+                        message = f"{info['path']} {info['size']}B removed={len(info['removed'])}"
+                        db.run_finish(conn, run_id, "ok", message)
+                        print("[sched] backup:", message, flush=True)
                     except Exception as e:
+                        db.run_finish(conn, run_id, "failed", str(e))
                         print("[sched] backup failed:", e, flush=True)
                         if config.ALERT_ON_FAILURE:
                             notify.send_text(notify.build_failure_alert("backup", str(e)))
                 # 每日简报（收盘后）：先刷新行情再快照推送；成功才置位当天已发送，
                 # 失败每 10 分钟重试一次并告警（修复"拼装异常即当天静默丢失"）
+                brief_date = now.date().isoformat()
+                retry_slot = (brief_date, now.minute // 10)
                 if now.hour == config.BRIEF_HOUR and now.minute >= config.BRIEF_MINUTE \
-                        and brief_sent_for != now.date() \
-                        and now.minute // 10 != brief_retry_slot:
-                    brief_retry_slot = now.minute // 10
+                        and not db.has_successful_run(conn, "daily_brief", brief_date) \
+                        and retry_slot != brief_retry_slot:
+                    brief_retry_slot = retry_slot
+                    run_id = db.run_start(conn, "daily_brief")
                     try:
                         try:                       # 简报前先刷新行情，确保用收盘价
                             collect_quotes(conn)
@@ -494,9 +542,8 @@ def scheduler_loop(stop_evt):
                     except Exception as e:         # 拼装/推送异常不静默放过
                         ok, detail = False, f"{type(e).__name__}: {e}"
                     print("[sched] brief:", ok, detail[:120], flush=True)
-                    if ok:
-                        brief_sent_for = now.date()
-                    elif config.ALERT_ON_FAILURE:
+                    db.run_finish(conn, run_id, "ok" if ok else "failed", detail[:500])
+                    if not ok and config.ALERT_ON_FAILURE:
                         notify.send_text(notify.build_failure_alert("daily_brief", detail))
             finally:
                 conn.close()

@@ -50,6 +50,15 @@ def to_symbol(code):
     return c[3:] if c.startswith("US.") else c
 
 
+def _canonical_symbol(raw, requested):
+    """将行情源的符号键映射回请求符号，兼容 BRK.B / BRK_B。"""
+    symbol = (raw or "").strip().upper()
+    if symbol in requested:
+        return symbol
+    dotted = symbol.replace("_", ".")
+    return dotted if dotted in requested else symbol
+
+
 def _f(x):
     try:
         v = float(x)
@@ -64,11 +73,12 @@ def _f(x):
 def fetch_tencent(codes):
     """返回 {symbol: {...}}。字段：4=现价 5=昨收 6=开盘；锚点(时间)后 +1=涨跌额 +2=涨跌% +3=最高 +4=最低 +5=币种"""
     syms = [to_symbol(c) for c in codes]
+    requested = set(syms)
     url = "https://qt.gtimg.cn/q=" + ",".join("us" + s for s in syms)
     text = _get(url)
     out = {}
-    for m in re.finditer(r'v_us(\w+)="([^"]*)"', text):
-        sym, body = m.group(1).upper(), m.group(2)
+    for m in re.finditer(r'v_us([A-Za-z0-9_.]+)="([^"]*)"', text):
+        sym, body = _canonical_symbol(m.group(1), requested), m.group(2)
         f = body.split("~")
         anchor = next((i for i, v in enumerate(f)
                        if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}", v)), None)
@@ -102,11 +112,12 @@ def fetch_sina(codes):
     """字段：1=名称 2=现价 3=涨跌% 4=时间 5=涨跌额 6=开盘 7=最高 8=最低
     锚点(EDT/EST 天文时间)后 +1 = 昨收"""
     syms = [to_symbol(c) for c in codes]
+    requested = set(syms)
     url = "https://hq.sinajs.cn/list=" + ",".join("gb_" + s.lower() for s in syms)
     text = _get(url, headers={"Referer": "https://finance.sina.com.cn"})
     out = {}
-    for m in re.finditer(r'var hq_str_gb_(\w+)="([^"]*)"', text):
-        sym, body = m.group(1).upper(), m.group(2)
+    for m in re.finditer(r'var hq_str_gb_([A-Za-z0-9_.]+)="([^"]*)"', text):
+        sym, body = _canonical_symbol(m.group(1), requested), m.group(2)
         f = body.split(",")
         if _f(f[1]) is None:
             continue

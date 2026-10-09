@@ -60,3 +60,15 @@ def test_backup_same_second_twice_ok(tmp_path):
         assert len(glob.glob(d + "/futu_*.db")) == 2
     finally:
         conn.close()
+
+
+def test_backup_keep_zero_removes_all_backups(tmp_path):
+    """keep=0 明确表示不保留备份文件。"""
+    conn = db.connect(str(tmp_path / "t.db"))
+    db.init_db(conn)
+    try:
+        result = db.backup(dest_dir=str(tmp_path / "bk"), keep=0, conn=conn)
+        assert not os.path.exists(result["path"])
+        assert result["kept"] == 0
+    finally:
+        conn.close()

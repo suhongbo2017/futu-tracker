@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 CREATE INDEX IF NOT EXISTS idx_txn_code_time ON transactions(code, trade_time);
 CREATE INDEX IF NOT EXISTS idx_txn_all       ON transactions(trade_time, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_reverses_unique
+    ON transactions(reverses_id) WHERE reverses_id IS NOT NULL;
 
 -- ---------- 日线与快照 ----------
 CREATE TABLE IF NOT EXISTS quotes_daily (

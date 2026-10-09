@@ -42,8 +42,8 @@ def send_text(text, webhook=None, secret=None):
         with urllib.request.urlopen(req, timeout=config.HTTP_TIMEOUT) as r:
             body = r.read().decode("utf-8", errors="ignore")
         obj = json.loads(body) if body.strip().startswith("{") else {}
-        ok = obj.get("code", 0) == 0 or obj.get("StatusCode", 0) == 0
-        return ok, body[:300]
+        ok = obj.get("code") == 0 or obj.get("StatusCode") == 0
+        return ok, body[:300] if body else "空响应"
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
 
@@ -62,7 +62,8 @@ def build_daily_brief(date, rows, totals, conflicts=None, top_n=3):
         pnl = r.get("unrealized_pnl")
         last_s = f"{last:,.2f}" if last is not None else "-"    # 无行情时显示 -
         pnl_s = f"{sign}{pnl:,.2f}" if pnl is not None else "-"
-        return (f"{r.get('name') or r['code']}({r['code'].split('.')[-1]}) "
+        symbol = r["code"][3:] if r["code"].startswith("US.") else r["code"]
+        return (f"{r.get('name') or r['code']}({symbol}) "
                 f"{last_s} | 浮盈 {pnl_s} USD")
 
     parts = [f"📈 持仓1 收盘简报 {date}", ""]
@@ -93,6 +94,10 @@ def build_daily_brief(date, rows, totals, conflicts=None, top_n=3):
     if conflicts:
         parts.append("")
         parts.append(f"⚠️ 数据源分歧 {len(conflicts)} 条（价差 >{config.CROSS_CHECK_TOLERANCE_PCT}%）")
+    missing = totals.get("missing_price_count") or 0
+    if missing:
+        parts.append("")
+        parts.append(f"⚠️ {missing} 只持仓缺少行情，市值/浮盈汇总不完整")
     return "\n".join(parts)
 
 
