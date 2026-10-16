@@ -91,7 +91,7 @@ def layout(title, body, msg="", err=""):
 <title>{html.escape(title)} · 持仓1</title><style>{CSS}</style></head><body><div class="wrap">
 <header><h1>📈 持仓1 · 美股持仓管理</h1>
 <div class="sub">{html.escape(title)}</div>
-<nav><a href="/">总览</a><a href="/tx">记账</a><a href="/history">回溯</a><a href="/api/positions">API</a></nav>
+<nav><a href="/">总览</a><a href="/tx">记账</a><a href="/performance">收益分析</a><a href="/history">回溯</a><a href="/api/positions">API</a></nav>
 </header>{msgbox}{errbox}{body}
 <footer>futu-tracker · 数据源 腾讯/新浪 · 币种 USD · 红涨绿跌</footer></div></body></html>"""
 
@@ -122,6 +122,89 @@ def current_view(conn, date=None):
     out.sort(key=lambda r: (r.get("unrealized_pnl") or 0), reverse=True)
     totals = portfolio_totals(out)
     return out, totals
+
+
+def performance_data(conn, start=None, end=None, code=None):
+    """Return close-of-day performance rows from persisted snapshots."""
+    args = []
+    where = []
+    if start:
+        where.append("date>=?"); args.append(start)
+    if end:
+        where.append("date<=?"); args.append(end)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    if code:
+        args_code = [code] + args
+        where_code = ["code=?"] + where
+        sql = """SELECT date, market_value, unrealized_pnl, realized_pnl, total_pnl
+                    FROM portfolio_snapshots WHERE """ + " AND ".join(where_code) + " ORDER BY date"
+        rows = [dict(r) for r in conn.execute(sql, args_code)]
+        return rows
+    sql = "SELECT date, market_value, unrealized_pnl, realized_pnl, total_pnl, cash_balance, total_assets, day_change_pct FROM portfolio_summary" + clause + " ORDER BY date"
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
+def _svg_line(rows, key, color="#6d8f6a"):
+    values = [r.get(key) for r in rows if r.get(key) is not None]
+    if not values:
+        return '<p class="small">暂无已生成的日终快照。请在收盘后运行 <code>python -m app.collector --snapshot</code>。</p>'
+    width, height, pad = 900, 260, 32
+    lo, hi = min(values), max(values)
+    if hi == lo:
+        lo, hi = lo - 1, hi + 1
+    points = []
+    for i, row in enumerate(rows):
+        value = row.get(key)
+        if value is None:
+            continue
+        x = pad + (width - 2 * pad) * (i / max(len(rows) - 1, 1))
+        y = height - pad - (height - 2 * pad) * ((value - lo) / (hi - lo))
+        points.append(f"{x:.1f},{y:.1f}")
+    label = html.escape(key)
+    return (f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{label}曲线" '
+            'style="width:100%;height:auto;background:#fff;border:1px solid #cdd6c4;border-radius:10px">'
+            f'<polyline points="{" ".join(points)}" fill="none" stroke="{color}" stroke-width="3"/>'
+            f'<text x="{pad}" y="20" fill="#5b6b58" font-size="13">最高 {_fmt(hi)} · 最低 {_fmt(lo)}</text>'
+            '</svg>')
+
+
+def page_performance(conn, start=None, end=None, code=None, msg="", err=""):
+    rows = performance_data(conn, start, end, code)
+    insts = {i["code"]: i for i in db.list_instruments(conn)}
+    options = '<option value="">组合</option>' + "".join(
+        f'<option value="{html.escape(i["code"])}"{" selected" if i["code"] == code else ""}>'
+        f'{html.escape(i["code"])} · {html.escape(i["name"])}</option>' for i in db.list_instruments(conn))
+    form = (f'<form method="get" action="/performance"><div><label>开始日期</label>'
+            f'<input name="start" value="{html.escape(start or "")}" type="date"></div>'
+            f'<div><label>结束日期</label><input name="end" value="{html.escape(end or "")}" type="date"></div>'
+            f'<div><label>范围</label><select name="code">{options}</select></div>'
+            '<button type="submit">查看</button></form>')
+    if not rows:
+        return layout("收益分析", form + '<p class="msg">暂无收益快照。该页面只按美股每日收盘后的快照结算。</p>', msg, err)
+    latest = rows[-1]
+    first_pnl = next((r.get("total_pnl") for r in rows if r.get("total_pnl") is not None), 0) or 0
+    latest_pnl = latest.get("total_pnl") or 0
+    pnl_values = [r.get("total_pnl") for r in rows if r.get("total_pnl") is not None]
+    peak = max(pnl_values) if pnl_values else 0
+    max_drawdown = min((v - peak for v in pnl_values), default=0)
+    cards = f'''<div class="cards">
+<div class="card"><div class="k">累计收益</div><div class="v {_cls(latest_pnl)}">{_fmt(latest_pnl)}</div></div>
+<div class="card"><div class="k">区间收益</div><div class="v {_cls(latest_pnl-first_pnl)}">{_fmt(latest_pnl-first_pnl)}</div></div>
+<div class="card"><div class="k">现金余额</div><div class="v">{_fmt(latest.get("cash_balance"))}</div></div>
+<div class="card"><div class="k">总资产</div><div class="v">{_fmt(latest.get("total_assets"))}</div></div>
+<div class="card"><div class="k">最大回撤</div><div class="v down">{_fmt(max_drawdown)}</div></div></div>'''
+    table = ['<table><thead><tr><th>收盘日</th><th>现金</th><th>持仓市值</th><th>总资产</th><th>累计收益</th><th>当日总资产变化</th></tr></thead><tbody>']
+    for r in rows:
+        table.append(f'<tr><td>{html.escape(str(r["date"]))}</td>'
+                     f'<td class="num">{_fmt(r.get("cash_balance"))}</td>'
+                     f'<td class="num">{_fmt(r.get("market_value"))}</td>'
+                     f'<td class="num">{_fmt(r.get("total_assets"))}</td>'
+                     f'<td class="num {_cls(r.get("total_pnl"))}">{_fmt(r.get("total_pnl"))}</td>'
+                     f'<td class="num {_cls(r.get("day_change_pct"))}">{_fmt(r.get("day_change_pct"), "+.2f")} %</td></tr>')
+    table.append('</tbody></table>')
+    note = '<p class="small" style="margin:10px 0">所有数据按美股收盘日终结算；现金从 0 USD 开始按流水推导。卖出回款进入现金，不重复计入收益。</p>'
+    chart = _svg_line(rows, "total_pnl", "#c0392b")
+    return layout("收益分析", form + cards + note + chart + "".join(table), msg, err)
 
 
 def page_index(conn, msg="", err=""):
@@ -364,6 +447,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(page_index(conn, msg=msg))
             if u.path == "/tx":
                 return self._send(page_tx(conn, msg=msg))
+            if u.path == "/performance":
+                start = (q.get("start") or [None])[0] or None
+                end = (q.get("end") or [None])[0] or None
+                code = (q.get("code") or [None])[0] or None
+                try:
+                    for value in (start, end):
+                        if value:
+                            dt.date.fromisoformat(value)
+                    if start and end and start > end:
+                        raise ValueError
+                except ValueError:
+                    return self._send(page_performance(conn, start, end, code,
+                                                        err="日期范围无效"))
+                return self._send(page_performance(conn, start, end, code, msg=msg))
+            if u.path == "/api/performance":
+                start = (q.get("start") or [None])[0] or None
+                end = (q.get("end") or [None])[0] or None
+                code = (q.get("code") or [None])[0] or None
+                rows = performance_data(conn, start, end, code)
+                return self._send(json.dumps({"rows": rows, "code": code},
+                                             ensure_ascii=False, default=str),
+                                  ctype="application/json; charset=utf-8")
             if u.path == "/history":
                 history_date = (q.get("date") or [None])[0]
                 if history_date:

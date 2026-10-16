@@ -27,6 +27,16 @@ def init_db(conn=None):
     try:
         with open(SCHEMA_PATH, encoding="utf-8") as f:
             conn.executescript(f.read())
+        # schema.sql is also the lightweight migration path for existing databases.
+        _ensure_columns(conn, "portfolio_snapshots", {
+            "realized_pnl": "REAL NOT NULL DEFAULT 0",
+            "total_pnl": "REAL",
+        })
+        _ensure_columns(conn, "portfolio_summary", {
+            "total_pnl": "REAL",
+            "cash_balance": "REAL",
+            "total_assets": "REAL",
+        })
         conn.commit()
     finally:
         if own:
@@ -42,6 +52,13 @@ def tx(conn):
     except Exception:
         conn.rollback()
         raise
+
+
+def _ensure_columns(conn, table, columns):
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    for name, definition in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 # ---------- runs ----------

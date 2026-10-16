@@ -9,7 +9,8 @@ from app import db
 from app.accounting import portfolio_totals
 from app.collector import snapshot
 from app.sources import _canonical_symbol
-from app.web import _available_qty, _normalize_trade_time, normalize_code
+from app.web import (_available_qty, _normalize_trade_time, normalize_code,
+                     performance_data)
 
 
 def _conn():
@@ -92,6 +93,43 @@ def test_snapshot_uses_common_valuation_date():
         assert result["date"] == "2026-01-01"
         assert result["status"] == "partial"
         assert result["missing_price_count"] == 1
+    finally:
+        conn.close()
+
+
+def test_snapshot_tracks_close_cash_and_total_assets():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    try:
+        db.ensure_instrument(conn, "US.TEST")
+        db.insert_transaction(conn, "US.TEST", "BUY", 100, 10, fee=5,
+                              trade_time="2026-01-01T10:00:00")
+        db.insert_transaction(conn, "US.TEST", "SELL", 120, 4, fee=2,
+                              trade_time="2026-01-02T10:00:00")
+        db.upsert_quote(conn, "US.TEST", "2026-01-01", 100, 100, 100, 110, 1, "test")
+        db.upsert_quote(conn, "US.TEST", "2026-01-02", 120, 120, 120, 120, 1, "test")
+        first = snapshot(conn, "2026-01-01")
+        second = snapshot(conn, "2026-01-02")
+        assert first["cash_balance"] == -1005
+        assert second["cash_balance"] == -527
+        assert second["total_assets"] == 193
+    finally:
+        conn.close()
+
+
+def test_performance_data_reads_summary_and_filters_dates():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    try:
+        conn.execute("INSERT INTO portfolio_summary(date, market_value, total_pnl, cash_balance, total_assets) VALUES (?,?,?,?,?)",
+                     ("2026-01-01", 100, 0, -100, 0))
+        conn.execute("INSERT INTO portfolio_summary(date, market_value, total_pnl, cash_balance, total_assets) VALUES (?,?,?,?,?)",
+                     ("2026-01-02", 120, 20, -100, 20))
+        conn.commit()
+        rows = performance_data(conn, "2026-01-02", "2026-01-02")
+        assert len(rows) == 1
+        assert rows[0]["cash_balance"] == -100
+        assert rows[0]["total_assets"] == 20
     finally:
         conn.close()
 

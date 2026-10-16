@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
     close          REAL,
     market_value   REAL,
     unrealized_pnl REAL,
+    realized_pnl   REAL NOT NULL DEFAULT 0,
+    total_pnl      REAL,
     PRIMARY KEY (date, code)
 );
 
@@ -66,6 +68,9 @@ CREATE TABLE IF NOT EXISTS portfolio_summary (
     cost_basis      REAL,
     unrealized_pnl  REAL,
     realized_pnl    REAL,
+    total_pnl       REAL,
+    cash_balance    REAL,
+    total_assets    REAL,
     day_change_pct  REAL,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

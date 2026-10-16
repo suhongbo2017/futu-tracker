@@ -16,6 +16,37 @@ from collections import OrderedDict
 SIDES = ("BUY", "SELL", "DIV", "FEE", "ADJ")
 
 
+def cash_balance(transactions):
+    """Replay ledger cash flow from a zero starting balance.
+
+    Cash is separate from investment return: SELL proceeds increase cash, while
+    realized P&L is already reflected in the sale proceeds and is not added twice.
+    Reversed transactions are ignored with the same rule as compute_positions.
+    """
+    reversed_ids = {t["reverses_id"] for t in transactions if t.get("reverses_id")}
+    cash = 0.0
+    for t in transactions:
+        if t.get("id") in reversed_ids:
+            continue
+        side = (t.get("side") or "").upper()
+        price = float(t.get("price") or 0.0)
+        qty = float(t.get("qty") or 0.0)
+        fee = float(t.get("fee") or 0.0)
+        if side == "BUY":
+            cash -= price * qty + fee
+        elif side == "SELL":
+            cash += price * qty - fee
+        elif side == "DIV":
+            cash += price
+        elif side == "FEE":
+            cash -= price
+        elif side == "ADJ":
+            pass
+        else:
+            raise ValueError(f"未知 side: {side!r}")
+    return cash
+
+
 def _new_pos():
     return {"qty": 0.0, "avg_cost": 0.0, "realized_pnl": 0.0, "cost_basis": 0.0}
 
@@ -101,6 +132,7 @@ def portfolio_totals(rows):
     cost_basis = sum(r["cost_basis"] or 0.0 for r in rows)
     unrealized = sum(r["unrealized_pnl"] or 0.0 for r in rows)
     realized = sum(r["realized_pnl"] or 0.0 for r in rows)
+    total_pnl = realized + unrealized
     missing_price_count = sum(1 for r in rows if r.get("qty") and not r.get("has_price", r.get("last") is not None))
     held_count = sum(1 for r in rows if r.get("qty"))
     return {
@@ -108,6 +140,7 @@ def portfolio_totals(rows):
         "cost_basis": cost_basis,
         "unrealized_pnl": unrealized,
         "realized_pnl": realized,
+        "total_pnl": total_pnl,
         "unrealized_pct": (unrealized / cost_basis * 100) if cost_basis else None,
         "missing_price_count": missing_price_count,
         "held_count": held_count,

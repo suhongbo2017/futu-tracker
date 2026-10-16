@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.accounting import compute_positions, mark_to_market, portfolio_totals  # noqa: E402
+from app.accounting import compute_positions, mark_to_market, portfolio_totals, cash_balance  # noqa: E402
 
 
 def txn(i, side, price=0.0, qty=0.0, fee=0.0, trade_time=None, reverses_id=None, code="US.TEST"):
@@ -83,6 +83,17 @@ class TestWeightedAverage(unittest.TestCase):
         self.assertAlmostEqual(r["market_value"], 1300)
         self.assertAlmostEqual(r["unrealized_pnl"], 300)
         self.assertAlmostEqual(r["unrealized_pct"], 30)
+
+    def test_cash_balance_includes_sale_proceeds_once(self):
+        txns = [txn(1, "BUY", 100, 10, fee=5),
+                txn(2, "SELL", 120, 4, fee=2),
+                txn(3, "DIV", 30), txn(4, "FEE", 4)]
+        # -1005 + 478 + 30 - 4 = -501; sale P&L is not added a second time.
+        self.assertAlmostEqual(cash_balance(txns), -501)
+
+    def test_cash_balance_ignores_reversed_transactions(self):
+        txns = [txn(1, "BUY", 100, 2), txn(2, "SELL", reverses_id=1)]
+        self.assertAlmostEqual(cash_balance(txns), 0)
 
     def test_totals_are_usd_sums(self):
         p = compute_positions([txn(1, "BUY", 100, 10), txn(2, "SELL", 120, 4)])

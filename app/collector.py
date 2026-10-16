@@ -18,7 +18,7 @@ except Exception:                                  # pragma: no cover
     _NY = None
 
 from . import config, db, sources
-from .accounting import compute_positions, mark_to_market, portfolio_totals
+from .accounting import compute_positions, mark_to_market, portfolio_totals, cash_balance
 
 
 # --------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def collect_history(conn):
 def snapshot(conn, date=None):
     """按统一估值日生成组合快照，避免混用不同交易日的价格。"""
     insts = {i["code"]: i for i in db.list_instruments(conn)}
-    txns = db.all_transactions(conn)
+    txns = db.all_transactions(conn, upto=(date + "T23:59:59") if date else None)
     if not txns:
         return {"status": "skipped", "message": "无流水，跳过快照"}
 
@@ -193,33 +193,44 @@ def snapshot(conn, date=None):
             if not r["qty"]:
                 continue
             conn.execute(
-                """INSERT INTO portfolio_snapshots(date, code, qty, avg_cost, close, market_value, unrealized_pnl)
-                   VALUES (?,?,?,?,?,?,?)
+                """INSERT INTO portfolio_snapshots(
+                       date, code, qty, avg_cost, close, market_value,
+                       unrealized_pnl, realized_pnl, total_pnl)
+                   VALUES (?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(date, code) DO UPDATE SET
                      qty=excluded.qty, avg_cost=excluded.avg_cost, close=excluded.close,
-                     market_value=excluded.market_value, unrealized_pnl=excluded.unrealized_pnl""",
+                     market_value=excluded.market_value, unrealized_pnl=excluded.unrealized_pnl,
+                     realized_pnl=excluded.realized_pnl, total_pnl=excluded.total_pnl""",
                 (used_date, code, r["qty"], r["avg_cost"], r["last"],
-                 r["market_value"], r["unrealized_pnl"]),
+                 r["market_value"], r["unrealized_pnl"], r["realized_pnl"],
+                 r["realized_pnl"] + (r["unrealized_pnl"] or 0.0)),
             )
         prev = conn.execute(
-            "SELECT market_value FROM portfolio_summary WHERE date<? ORDER BY date DESC LIMIT 1",
+            "SELECT total_assets FROM portfolio_summary WHERE date<? ORDER BY date DESC LIMIT 1",
             (used_date,)).fetchone()
-        prev_mv = prev["market_value"] if prev else None
-        day_pct = ((totals["market_value"] / prev_mv - 1) * 100) if prev_mv else None
+        cash = cash_balance(txns)
+        total_assets = cash + totals["market_value"]
+        prev_assets = prev["total_assets"] if prev else None
+        day_pct = ((total_assets / prev_assets - 1) * 100) if prev_assets else None
         conn.execute(
-            """INSERT INTO portfolio_summary(date, market_value, cost_basis, unrealized_pnl, realized_pnl, day_change_pct)
-               VALUES (?,?,?,?,?,?)
+            """INSERT INTO portfolio_summary(
+                   date, market_value, cost_basis, unrealized_pnl, realized_pnl,
+                   total_pnl, cash_balance, total_assets, day_change_pct)
+               VALUES (?,?,?,?,?,?,?,?,?)
                ON CONFLICT(date) DO UPDATE SET
                  market_value=excluded.market_value, cost_basis=excluded.cost_basis,
                  unrealized_pnl=excluded.unrealized_pnl, realized_pnl=excluded.realized_pnl,
-                 day_change_pct=excluded.day_change_pct""",
+                 total_pnl=excluded.total_pnl, cash_balance=excluded.cash_balance,
+                 total_assets=excluded.total_assets, day_change_pct=excluded.day_change_pct""",
             (used_date, totals["market_value"], totals["cost_basis"],
-             totals["unrealized_pnl"], totals["realized_pnl"], day_pct),
+             totals["unrealized_pnl"], totals["realized_pnl"], totals["total_pnl"],
+             cash, total_assets, day_pct),
         )
     status = "partial" if missing else "ok"
     db.run_finish(conn, run_id, status,
                   f"date={used_date} 市值={totals['market_value']:.2f} 缺行情={missing}")
-    totals.update({"status": status, "date": used_date, "rows": rows})
+    totals.update({"status": status, "date": used_date, "rows": rows,
+                   "cash_balance": cash, "total_assets": total_assets})
     return totals
 
 
