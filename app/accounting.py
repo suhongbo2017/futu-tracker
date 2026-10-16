@@ -13,7 +13,7 @@
 """
 from collections import OrderedDict
 
-SIDES = ("BUY", "SELL", "DIV", "FEE", "ADJ")
+SIDES = ("BUY", "SELL", "DIV", "FEE", "ADJ", "CASH_IN", "CASH_OUT")
 
 
 def cash_balance(transactions):
@@ -32,7 +32,11 @@ def cash_balance(transactions):
         price = float(t.get("price") or 0.0)
         qty = float(t.get("qty") or 0.0)
         fee = float(t.get("fee") or 0.0)
-        if side == "BUY":
+        if side == "CASH_IN":
+            cash += price
+        elif side == "CASH_OUT":
+            cash -= price
+        elif side == "BUY":
             cash -= price * qty + fee
         elif side == "SELL":
             cash += price * qty - fee
@@ -99,6 +103,8 @@ def compute_positions(transactions):
     positions = OrderedDict()
     for t in transactions:
         if t.get("id") in reversed_ids:
+            continue
+        if (t.get("side") or "").upper() in ("CASH_IN", "CASH_OUT"):
             continue
         code = t["code"]
         pos = positions.setdefault(code, _new_pos())

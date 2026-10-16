@@ -124,8 +124,8 @@ def current_view(conn, date=None):
     return out, totals
 
 
-def performance_data(conn, start=None, end=None, code=None):
-    """Return close-of-day performance rows from persisted snapshots."""
+def performance_data(conn, start=None, end=None):
+    """Return portfolio-level close-of-day performance rows."""
     args = []
     where = []
     if start:
@@ -133,14 +133,7 @@ def performance_data(conn, start=None, end=None, code=None):
     if end:
         where.append("date<=?"); args.append(end)
     clause = (" WHERE " + " AND ".join(where)) if where else ""
-    if code:
-        args_code = [code] + args
-        where_code = ["code=?"] + where
-        sql = """SELECT date, market_value, unrealized_pnl, realized_pnl, total_pnl
-                    FROM portfolio_snapshots WHERE """ + " AND ".join(where_code) + " ORDER BY date"
-        rows = [dict(r) for r in conn.execute(sql, args_code)]
-        return rows
-    sql = "SELECT date, market_value, unrealized_pnl, realized_pnl, total_pnl, cash_balance, total_assets, day_change_pct FROM portfolio_summary" + clause + " ORDER BY date"
+    sql = "SELECT date, cost_basis, unrealized_pnl, market_value, cash_balance, total_assets, day_change_pct FROM portfolio_summary" + clause + " ORDER BY date"
     return [dict(r) for r in conn.execute(sql, args)]
 
 
@@ -176,48 +169,43 @@ def _svg_line(rows, key, color="#6d8f6a"):
             '</svg>')
 
 
-def page_performance(conn, start=None, end=None, code=None, msg="", err=""):
-    rows = performance_data(conn, start, end, code)
-    insts = {i["code"]: i for i in db.list_instruments(conn)}
-    options = '<option value="">组合</option>' + "".join(
-        f'<option value="{html.escape(i["code"])}"{" selected" if i["code"] == code else ""}>'
-        f'{html.escape(i["code"])} · {html.escape(i["name"])}</option>' for i in db.list_instruments(conn))
+def page_performance(conn, start=None, end=None, msg="", err=""):
+    rows = performance_data(conn, start, end)
     form = (f'<form method="get" action="/performance"><div><label>开始日期</label>'
             f'<input name="start" value="{html.escape(start or "")}" type="date"></div>'
             f'<div><label>结束日期</label><input name="end" value="{html.escape(end or "")}" type="date"></div>'
-            f'<div><label>范围</label><select name="code">{options}</select></div>'
-            '<button type="submit">查看</button></form>')
+            '<button type="submit">查看组合汇总</button></form>')
     if not rows:
         return layout("收益分析", form + '<p class="msg">暂无收益快照。该页面只按美股每日收盘后的快照结算。</p>', msg, err)
     latest = rows[-1]
-    first_pnl = next((r.get("total_pnl") for r in rows if r.get("total_pnl") is not None), 0) or 0
-    latest_pnl = latest.get("total_pnl") or 0
-    pnl_values = [r.get("total_pnl") for r in rows if r.get("total_pnl") is not None]
+    first_pnl = ((rows[0].get("market_value") or 0) - (rows[0].get("cost_basis") or 0))
+    latest_pnl = (latest.get("market_value") or 0) - (latest.get("cost_basis") or 0)
+    pnl_values = [(r.get("market_value") or 0) - (r.get("cost_basis") or 0) for r in rows]
     peak = max(pnl_values) if pnl_values else 0
     max_drawdown = min((v - peak for v in pnl_values), default=0)
     cards = f'''<div class="cards">
-<div class="card"><div class="k">累计收益</div><div class="v {_cls(latest_pnl)}">{_fmt(latest_pnl)}</div></div>
-<div class="card"><div class="k">区间收益</div><div class="v {_cls(latest_pnl-first_pnl)}">{_fmt(latest_pnl-first_pnl)}</div></div>
+<div class="card"><div class="k">当前浮动收益</div><div class="v {_cls(latest_pnl)}">{_fmt(latest_pnl)}</div></div>
+<div class="card"><div class="k">区间浮动收益变化</div><div class="v {_cls(latest_pnl-first_pnl)}">{_fmt(latest_pnl-first_pnl)}</div></div>
 <div class="card"><div class="k">现金余额</div><div class="v">{_fmt(latest.get("cash_balance"))}</div></div>
 <div class="card"><div class="k">总资产</div><div class="v">{_fmt(latest.get("total_assets"))}</div></div>
 <div class="card"><div class="k">最大回撤</div><div class="v down">{_fmt(max_drawdown)}</div></div></div>'''
-    table = ['<table><thead><tr><th>收盘日</th><th>现金</th><th>持仓市值</th><th>总资产</th><th>累计收益</th><th>当日总资产变化</th></tr></thead><tbody>']
+    table = ['<table><thead><tr><th>收盘日</th><th>股票成本价值</th><th>浮动收益</th><th>股票市值</th><th>现金余额</th><th>全部资产价值</th></tr></thead><tbody>']
     for r in rows:
         table.append(f'<tr><td>{html.escape(str(r["date"]))}</td>'
-                     f'<td class="num">{_fmt(r.get("cash_balance"))}</td>'
+                     f'<td class="num">{_fmt(r.get("cost_basis"))}</td>'
+                     f'<td class="num {_cls(r.get("unrealized_pnl"))}">{_fmt(r.get("unrealized_pnl"))}</td>'
                      f'<td class="num">{_fmt(r.get("market_value"))}</td>'
-                     f'<td class="num">{_fmt(r.get("total_assets"))}</td>'
-                     f'<td class="num {_cls(r.get("total_pnl"))}">{_fmt(r.get("total_pnl"))}</td>'
-                     f'<td class="num {_cls(r.get("day_change_pct"))}">{_fmt(r.get("day_change_pct"), "+.2f")} %</td></tr>')
+                     f'<td class="num">{_fmt(r.get("cash_balance"))}</td>'
+                     f'<td class="num">{_fmt(r.get("total_assets"))}</td></tr>')
     table.append('</tbody></table>')
-    note = '<p class="small" style="margin:10px 0">所有数据按美股收盘日终结算；现金从 0 USD 开始按流水推导。卖出回款进入现金，不重复计入收益。</p>'
-    chart = ('<h3 style="margin:22px 0 8px;color:#4f6e4d;font-size:17px">累计收益曲线</h3>'
-             + _svg_line(rows, "total_pnl", "#c0392b"))
-    cash_chart = ""
-    if not code:
-        cash_chart = ('<h3 style="margin:22px 0 8px;color:#4f6e4d;font-size:17px">现金储备曲线</h3>'
-                      + _svg_line(rows, "cash_balance", "#6d8f6a"))
-    return layout("收益分析", form + cards + note + chart + cash_chart + "".join(table), msg, err)
+    note = '<p class="small" style="margin:10px 0">全部数据按美股收盘日终结算。股票市值 = 股票成本价值 + 浮动收益；全部资产价值 = 股票市值 + 现金余额。</p>'
+    charts = ''.join([
+        '<h3 style="margin:22px 0 8px;color:#4f6e4d;font-size:17px">股票成本价值</h3>' + _svg_line(rows, "cost_basis", "#6d8f6a"),
+        '<h3 style="margin:22px 0 8px;color:#4f6e4d;font-size:17px">浮动收益</h3>' + _svg_line(rows, "unrealized_pnl", "#c0392b"),
+        '<h3 style="margin:22px 0 8px;color:#4f6e4d;font-size:17px">现金余额</h3>' + _svg_line(rows, "cash_balance", "#a08152"),
+        '<h3 style="margin:22px 0 8px;color:#4f6e4d;font-size:17px">全部资产价值</h3>' + _svg_line(rows, "total_assets", "#4f6e4d"),
+    ])
+    return layout("收益分析", form + cards + note + charts + "".join(table), msg, err)
 
 
 def page_index(conn, msg="", err=""):
@@ -273,12 +261,13 @@ def page_tx(conn, msg="", err=""):
     opts = "".join(f'<option value="{html.escape(i["code"])}">{html.escape(i["code"])} · {html.escape(i["name"])}</option>' for i in insts)
     now = dt.datetime.now().strftime("%Y-%m-%dT%H:%M")
     form = f"""<form method="post" action="/tx">
-<div><label>标的</label><input name="code" list="codes" placeholder="如 US.AAPL 或 AAPL" required style="width:200px">
-<datalist id="codes">{opts}</datalist><span class="small">选已有代码，或直接输入新代码（将自动注册为 US.XXX）</span></div>
+<div><label>标的</label><input name="code" list="codes" placeholder="如 US.AAPL；入金/出金使用 CASH" style="width:240px">
+<datalist id="codes">{opts}</datalist><span class="small">入金/出金会自动使用虚拟标的 CASH</span></div>
 <div><label>方向</label><select name="side">
   <option value="BUY">买入 BUY</option><option value="SELL">卖出 SELL</option>
   <option value="DIV">分红 DIV</option><option value="FEE">费用 FEE</option>
-  <option value="ADJ">拆合股 ADJ</option></select></div>
+  <option value="ADJ">拆合股 ADJ</option><option value="CASH_IN">入金 CASH_IN</option>
+  <option value="CASH_OUT">出金 CASH_OUT</option></select></div>
 <div><label>价格 / 金额</label><input name="price" type="number" step="any" required style="width:120px"></div>
 <div><label>股数</label><input name="qty" type="number" step="any" value="0" style="width:110px"></div>
 <div><label>手续费</label><input name="fee" type="number" step="any" value="0" style="width:100px"></div>
@@ -463,7 +452,6 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/performance":
                 start = (q.get("start") or [None])[0] or None
                 end = (q.get("end") or [None])[0] or None
-                code = (q.get("code") or [None])[0] or None
                 try:
                     for value in (start, end):
                         if value:
@@ -471,15 +459,14 @@ class Handler(BaseHTTPRequestHandler):
                     if start and end and start > end:
                         raise ValueError
                 except ValueError:
-                    return self._send(page_performance(conn, start, end, code,
+                    return self._send(page_performance(conn, start, end,
                                                         err="日期范围无效"))
-                return self._send(page_performance(conn, start, end, code, msg=msg))
+                return self._send(page_performance(conn, start, end, msg=msg))
             if u.path == "/api/performance":
                 start = (q.get("start") or [None])[0] or None
                 end = (q.get("end") or [None])[0] or None
-                code = (q.get("code") or [None])[0] or None
-                rows = performance_data(conn, start, end, code)
-                return self._send(json.dumps({"rows": rows, "code": code},
+                rows = performance_data(conn, start, end)
+                return self._send(json.dumps({"rows": rows},
                                              ensure_ascii=False, default=str),
                                   ctype="application/json; charset=utf-8")
             if u.path == "/history":
@@ -514,10 +501,10 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.connect()
         try:
             if self.path == "/tx":
-                code = normalize_code(g("code"))
+                side = g("side").upper()
+                code = "CASH" if side in ("CASH_IN", "CASH_OUT") else normalize_code(g("code"))
                 if code is None:
                     return self._redirect("/tx", "❌ 标的代码格式无效（字母/数字，如 US.AAPL）")
-                side = g("side").upper()
                 try:
                     price = float(g("price") or 0)
                     qty = float(g("qty") or 0)
@@ -526,7 +513,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._redirect("/tx", "❌ 价格/股数/手续费必须是数字")
                 if not all(math.isfinite(v) for v in (price, qty, fee)):
                     return self._redirect("/tx", "❌ 价格/股数/手续费必须是有限数字")
-                if not code or side not in ("BUY", "SELL", "DIV", "FEE", "ADJ"):
+                if side in ("CASH_IN", "CASH_OUT"):
+                    if code != "CASH":
+                        return self._redirect("/tx", "❌ 入金/出金的标的必须填写 CASH")
+                    if price <= 0 or qty != 0 or fee != 0:
+                        return self._redirect("/tx", "❌ 入金/出金只填写正数金额，股数和手续费必须为 0")
+                elif not code or side not in ("BUY", "SELL", "DIV", "FEE", "ADJ"):
                     return self._redirect("/tx", "❌ 标的或方向无效")
                 if fee < 0:
                     return self._redirect("/tx", "❌ 手续费不能为负")

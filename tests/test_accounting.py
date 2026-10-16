@@ -91,6 +91,13 @@ class TestWeightedAverage(unittest.TestCase):
         # -1005 + 478 + 30 - 4 = -501; sale P&L is not added a second time.
         self.assertAlmostEqual(cash_balance(txns), -501)
 
+    def test_cash_flows_do_not_create_stock_positions(self):
+        txns = [txn(1, "CASH_IN", 10000), txn(2, "BUY", 100, 10),
+                txn(3, "CASH_OUT", 500)]
+        positions = compute_positions(txns)
+        self.assertNotIn("CASH", positions)
+        self.assertAlmostEqual(cash_balance(txns), 8500)
+
     def test_cash_balance_ignores_reversed_transactions(self):
         txns = [txn(1, "BUY", 100, 2), txn(2, "SELL", reverses_id=1)]
         self.assertAlmostEqual(cash_balance(txns), 0)

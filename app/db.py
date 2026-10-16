@@ -28,6 +28,8 @@ def init_db(conn=None):
         with open(SCHEMA_PATH, encoding="utf-8") as f:
             conn.executescript(f.read())
         # schema.sql is also the lightweight migration path for existing databases.
+        _migrate_transaction_sides(conn)
+        conn.execute("INSERT OR IGNORE INTO instruments(code, symbol, name, market, currency, active) VALUES ('CASH','CASH','现金','US','USD',0)")
         _ensure_columns(conn, "portfolio_snapshots", {
             "realized_pnl": "REAL NOT NULL DEFAULT 0",
             "total_pnl": "REAL",
@@ -52,6 +54,35 @@ def tx(conn):
     except Exception:
         conn.rollback()
         raise
+
+
+def _migrate_transaction_sides(conn):
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'").fetchone()
+    sql = (row[0] or "") if row else ""
+    if "CASH_IN" in sql and "CASH_OUT" in sql:
+        return
+    conn.execute("ALTER TABLE transactions RENAME TO transactions_legacy")
+    conn.execute("""CREATE TABLE transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL REFERENCES instruments(code),
+        side TEXT NOT NULL CHECK (side IN ('BUY','SELL','DIV','FEE','ADJ','CASH_IN','CASH_OUT')),
+        price REAL NOT NULL DEFAULT 0,
+        qty REAL NOT NULL DEFAULT 0,
+        fee REAL NOT NULL DEFAULT 0,
+        trade_time TEXT NOT NULL,
+        note TEXT,
+        source TEXT NOT NULL DEFAULT 'manual',
+        reverses_id INTEGER REFERENCES transactions(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )""")
+    conn.execute("""INSERT INTO transactions
+        (id, code, side, price, qty, fee, trade_time, note, source, reverses_id, created_at)
+        SELECT id, code, side, price, qty, fee, trade_time, note, source, reverses_id, created_at
+        FROM transactions_legacy""")
+    conn.execute("DROP TABLE transactions_legacy")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_txn_code_time ON transactions(code, trade_time)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_txn_all ON transactions(trade_time, id)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_reverses_unique ON transactions(reverses_id) WHERE reverses_id IS NOT NULL")
 
 
 def _ensure_columns(conn, table, columns):

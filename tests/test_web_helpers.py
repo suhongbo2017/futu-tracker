@@ -121,18 +121,22 @@ def test_performance_data_reads_summary_and_filters_dates():
     conn = db.connect(":memory:")
     db.init_db(conn)
     try:
-        conn.execute("INSERT INTO portfolio_summary(date, market_value, total_pnl, cash_balance, total_assets) VALUES (?,?,?,?,?)",
-                     ("2026-01-01", 100, 0, -100, 0))
-        conn.execute("INSERT INTO portfolio_summary(date, market_value, total_pnl, cash_balance, total_assets) VALUES (?,?,?,?,?)",
-                     ("2026-01-02", 120, 20, -100, 20))
+        conn.execute("INSERT INTO portfolio_summary(date, cost_basis, market_value, unrealized_pnl, cash_balance, total_assets) VALUES (?,?,?,?,?,?)",
+                     ("2026-01-01", 100, 100, 0, -100, 0))
+        conn.execute("INSERT INTO portfolio_summary(date, cost_basis, market_value, unrealized_pnl, cash_balance, total_assets) VALUES (?,?,?,?,?,?)",
+                     ("2026-01-02", 100, 120, 20, -100, 20))
         conn.commit()
         rows = performance_data(conn, "2026-01-02", "2026-01-02")
         assert len(rows) == 1
         assert rows[0]["cash_balance"] == -100
         assert rows[0]["total_assets"] == 20
         page = page_performance(conn)
-        assert "现金储备曲线" in page
-        assert "累计收益曲线" in page
+        assert page.count("<svg") == 4
+        assert "股票成本价值" in page
+        assert "浮动收益" in page
+        assert "现金余额" in page
+        assert "全部资产价值" in page
+        assert "范围" not in page
     finally:
         conn.close()
 

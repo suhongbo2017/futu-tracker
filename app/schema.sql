@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS instruments (
 CREATE TABLE IF NOT EXISTS transactions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     code        TEXT    NOT NULL REFERENCES instruments(code),
-    side        TEXT    NOT NULL CHECK (side IN ('BUY','SELL','DIV','FEE','ADJ')),
+    side        TEXT    NOT NULL CHECK (side IN ('BUY','SELL','DIV','FEE','ADJ','CASH_IN','CASH_OUT')),
     price       REAL    NOT NULL DEFAULT 0,   -- BUY/SELL: 成交价；DIV/FEE: 金额；ADJ: 忽略
     qty         REAL    NOT NULL DEFAULT 0,   -- BUY/SELL: 股数；ADJ: 股数增减
     fee         REAL    NOT NULL DEFAULT 0,   -- 手续费（计入成本）
@@ -34,6 +34,10 @@ CREATE INDEX IF NOT EXISTS idx_txn_code_time ON transactions(code, trade_time);
 CREATE INDEX IF NOT EXISTS idx_txn_all       ON transactions(trade_time, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_reverses_unique
     ON transactions(reverses_id) WHERE reverses_id IS NOT NULL;
+
+-- CASH is a virtual instrument used only by CASH_IN/CASH_OUT transactions.
+INSERT OR IGNORE INTO instruments(code, symbol, name, market, currency, active)
+VALUES ('CASH', 'CASH', '现金', 'US', 'USD', 0);
 
 -- ---------- 日线与快照 ----------
 CREATE TABLE IF NOT EXISTS quotes_daily (

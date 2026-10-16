@@ -172,9 +172,13 @@ def snapshot(conn, date=None):
         if q and q.get("date"):
             latest_dates.append(q["date"])
     if not latest_dates:
-        return {"status": "failed", "message": "库内无任何行情，无法生成快照"}
-
-    used_date = date or min(latest_dates)
+        # Cash-only portfolios still need a daily asset snapshot.
+        trade_dates = [t["trade_time"][:10] for t in txns if t.get("trade_time")]
+        if not trade_dates:
+            return {"status": "failed", "message": "库内无行情或资金流水，无法生成快照"}
+        used_date = date or max(trade_dates)
+    else:
+        used_date = date or min(latest_dates)
     prices = {}
     for code, pos in positions.items():
         if not pos.get("qty"):
