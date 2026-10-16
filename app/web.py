@@ -147,8 +147,12 @@ def performance_data(conn, start=None, end=None, code=None):
 def _svg_line(rows, key, color="#6d8f6a"):
     values = [r.get(key) for r in rows if r.get(key) is not None]
     if not values:
-        return '<p class="small">暂无已生成的日终快照。请在收盘后运行 <code>python -m app.collector --snapshot</code>。</p>'
-    width, height, pad = 900, 260, 32
+        return (f'<div class="msg">暂无“{html.escape(key)}”的日终快照数据。'
+                '请先执行 <code>python -m app.collector --snapshot</code>，'
+                '并确认数据库中已有收盘行情。</div>')
+    width, height, pad = 900, 260, 42
+    first_date = next((r.get("date") for r in rows if r.get(key) is not None), "")
+    last_date = next((r.get("date") for r in reversed(rows) if r.get(key) is not None), "")
     lo, hi = min(values), max(values)
     if hi == lo:
         lo, hi = lo - 1, hi + 1
@@ -162,9 +166,13 @@ def _svg_line(rows, key, color="#6d8f6a"):
         points.append(f"{x:.1f},{y:.1f}")
     label = html.escape(key)
     return (f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{label}曲线" '
-            'style="width:100%;height:auto;background:#fff;border:1px solid #cdd6c4;border-radius:10px">'
-            f'<polyline points="{" ".join(points)}" fill="none" stroke="{color}" stroke-width="3"/>'
-            f'<text x="{pad}" y="20" fill="#5b6b58" font-size="13">最高 {_fmt(hi)} · 最低 {_fmt(lo)}</text>'
+            'style="display:block;width:100%;height:auto;background:#fff;border:1px solid #cdd6c4;border-radius:10px">'
+            '<line x1="42" y1="228" x2="868" y2="228" stroke="#dfe6d6"/>'
+            '<line x1="42" y1="32" x2="42" y2="228" stroke="#dfe6d6"/>'
+            f'<polyline points="{" ".join(points)}" fill="none" stroke="{color}" stroke-width="3" stroke-linejoin="round"/>'
+            f'<text x="{pad}" y="20" fill="#5b6b58" font-size="13">最高 {_fmt(hi)} · 最低 {_fmt(lo)} · {html.escape(str(first_date))} 至 {html.escape(str(last_date))}</text>'
+            f'<text x="{pad}" y="248" fill="#5b6b58" font-size="12">{html.escape(str(first_date))}</text>'
+            f'<text x="{width-pad-80}" y="248" fill="#5b6b58" font-size="12">{html.escape(str(last_date))}</text>'
             '</svg>')
 
 
@@ -203,8 +211,13 @@ def page_performance(conn, start=None, end=None, code=None, msg="", err=""):
                      f'<td class="num {_cls(r.get("day_change_pct"))}">{_fmt(r.get("day_change_pct"), "+.2f")} %</td></tr>')
     table.append('</tbody></table>')
     note = '<p class="small" style="margin:10px 0">所有数据按美股收盘日终结算；现金从 0 USD 开始按流水推导。卖出回款进入现金，不重复计入收益。</p>'
-    chart = _svg_line(rows, "total_pnl", "#c0392b")
-    return layout("收益分析", form + cards + note + chart + "".join(table), msg, err)
+    chart = ('<h3 style="margin:22px 0 8px;color:#4f6e4d;font-size:17px">累计收益曲线</h3>'
+             + _svg_line(rows, "total_pnl", "#c0392b"))
+    cash_chart = ""
+    if not code:
+        cash_chart = ('<h3 style="margin:22px 0 8px;color:#4f6e4d;font-size:17px">现金储备曲线</h3>'
+                      + _svg_line(rows, "cash_balance", "#6d8f6a"))
+    return layout("收益分析", form + cards + note + chart + cash_chart + "".join(table), msg, err)
 
 
 def page_index(conn, msg="", err=""):

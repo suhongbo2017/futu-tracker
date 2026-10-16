@@ -190,7 +190,9 @@ def snapshot(conn, date=None):
     run_id = db.run_start(conn, "snapshot")
     with db.tx(conn):
         for code, r in rows.items():
-            if not r["qty"]:
+            # Keep zero-qty rows when they carry realized P&L, so a fully sold
+            # instrument remains visible in its historical performance series.
+            if not r["qty"] and not r["realized_pnl"]:
                 continue
             conn.execute(
                 """INSERT INTO portfolio_snapshots(

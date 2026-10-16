@@ -10,7 +10,7 @@ from app.accounting import portfolio_totals
 from app.collector import snapshot
 from app.sources import _canonical_symbol
 from app.web import (_available_qty, _normalize_trade_time, normalize_code,
-                     performance_data)
+                     page_performance, performance_data)
 
 
 def _conn():
@@ -130,6 +130,9 @@ def test_performance_data_reads_summary_and_filters_dates():
         assert len(rows) == 1
         assert rows[0]["cash_balance"] == -100
         assert rows[0]["total_assets"] == 20
+        page = page_performance(conn)
+        assert "现金储备曲线" in page
+        assert "累计收益曲线" in page
     finally:
         conn.close()
 
