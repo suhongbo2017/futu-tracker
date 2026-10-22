@@ -51,6 +51,7 @@ nav a:hover{background:#e2e9d9}
 .up{color:#c0392b}.down{color:#2f9e44}.flat{color:#868e96}
 table{width:100%;border-collapse:collapse;background:#f7f4ea;border:1px solid #cdd6c4;border-radius:10px;overflow:hidden;font-size:15px}
 th{background:#e2e9d9;color:#4f6e4d;text-align:left;padding:9px 10px;font-weight:600;white-space:nowrap}
+th.num{text-align:right;font-variant-numeric:tabular-nums}
 td{padding:8px 10px;border-top:1px solid #dfe6d6;white-space:nowrap}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 tr:hover td{background:#f2f6ec}
@@ -330,8 +331,8 @@ def page_history(conn, date=None, msg="", err=""):
 <div class="card"><div class="k">该日成本</div><div class="v">{_fmt(totals['cost_basis'])}</div></div>
 <div class="card"><div class="k">该日浮动盈亏</div><div class="v {_cls(totals['unrealized_pnl'])}">{_fmt(totals['unrealized_pnl'])}</div></div>
 <div class="card"><div class="k">累计已实现</div><div class="v {_cls(totals['realized_pnl'])}">{_fmt(totals['realized_pnl'])}</div></div></div>""")
-    body.append('<table><thead><tr><th>代码</th><th>名称</th><th>当日价</th><th>数量</th><th>均价</th>'
-                '<th>市值</th><th>浮动盈亏</th><th>价格日期</th></tr></thead><tbody>')
+    body.append('<table><thead><tr><th>代码</th><th>名称</th><th class="num">当日价</th><th class="num">数量</th><th class="num">均价</th>'
+                '<th class="num">市值</th><th class="num">浮动盈亏</th><th>价格日期</th></tr></thead><tbody>')
     for r in held:
         last_s = _fmt(r.get("last")) if r.get("has_price") else "-"
         mv_s = _fmt(r.get("market_value")) if r.get("has_price") else "-"

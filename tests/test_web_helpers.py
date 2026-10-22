@@ -10,7 +10,7 @@ from app.accounting import portfolio_totals
 from app.collector import snapshot
 from app.sources import _canonical_symbol
 from app.web import (_available_qty, _normalize_trade_time, normalize_code,
-                     page_performance, performance_data)
+                     page_history, page_performance, performance_data)
 
 
 def _conn():
@@ -172,5 +172,19 @@ def test_oversell_never_goes_negative():
         db.insert_transaction(conn, "US.NVDA", "BUY", 100, 10)
         assert _available_qty(conn, "US.NVDA", None) == 10.0
         assert 99 > _available_qty(conn, "US.NVDA", None)     # 99 股超卖请求必然超过可用
+    finally:
+        conn.close()
+def test_history_table_numeric_headers_match_numeric_cells():
+    conn = db.connect(":memory:")
+    db.init_db(conn)
+    try:
+        db.ensure_instrument(conn, "US.NVDA")
+        db.insert_transaction(conn, "US.NVDA", "BUY", 100, 2,
+                              trade_time="2026-01-01T10:00:00")
+        db.upsert_quote(conn, "US.NVDA", "2026-01-02", 110, 110, 110, 110, 1, "test")
+        rendered = page_history(conn, "2026-01-02")
+        assert rendered.count('<th class="num">') == 5
+        assert rendered.count("<td class='num") == 5
+        assert 'th.num{text-align:right;font-variant-numeric:tabular-nums}' in rendered
     finally:
         conn.close()
