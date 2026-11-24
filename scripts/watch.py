@@ -14,6 +14,7 @@
 提醒由 `collect_quotes` 自动评估，触发后一次性失效。
 """
 import argparse
+import os
 import sys
 
 from app import alerts, config, db
@@ -101,10 +102,19 @@ def cmd_due(args, conn):
     return 0 if r["sent"] else 1
 
 
+DEFAULT_ALERT_FILES = ("alerts.json", "/data/alerts.json")
+
+
 def cmd_load(args, conn):
     """从 JSON 批量导入标的与提醒（幂等：相同 code/direction/target 的监控中提醒会被跳过）。"""
     import json
-    with open(args.path, encoding="utf-8") as f:
+    path = args.path
+    if not path:
+        path = next((p for p in DEFAULT_ALERT_FILES if os.path.exists(p)), None)
+        if not path:
+            print("找不到 alerts.json：请放在当前目录或 /data/alerts.json，或显式传入路径")
+            return 1
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     added_inst = 0
@@ -209,7 +219,7 @@ def main(argv=None):
     p.set_defaults(func=cmd_due)
 
     p = sub.add_parser("load", help="从 JSON 批量导入标的与提醒（幂等）")
-    p.add_argument("path")
+    p.add_argument("path", nargs="?")
     p.set_defaults(func=cmd_load)
 
     p = sub.add_parser("check", help="用库内最新价立即评估")

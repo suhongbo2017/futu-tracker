@@ -107,7 +107,8 @@ python -m scripts.watch remind 2026-12-02 "CRM 财报" --code US.CRM   # 日期�
 python -m scripts.watch reminders                        # 列出日期提醒
 python -m scripts.watch due --date 2026-12-02 --dry      # 演练当天会推送什么
 python -m scripts.watch rm 3                            # 删除提醒
-python -m scripts.watch load alerts.json                # 批量导入（幂等，可反复执行）
+python -m scripts.watch load                            # 批量导入（自动找 alerts.json 或 /data/alerts.json）
+python -m scripts.watch load 路径.json                    # 指定文件
 ```
 
 本地配置文件为仓库根目录的 `alerts.json`（已加入 `.gitignore`，**不会提交到公开仓库**）。首次使用从示例复制：
