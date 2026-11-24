@@ -90,6 +90,33 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_kind_time ON runs(kind, started_at);
 
+-- ---------- 价格提醒（一次性触发；触发后 active=0）----------
+-- 语义：direction=below 表示"跌到 target 或更低"，above 表示"涨到 target 或更高"。
+-- 触发后记录 triggered_at / triggered_price，避免同一提醒反复推送。
+CREATE TABLE IF NOT EXISTS price_alerts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    code            TEXT    NOT NULL REFERENCES instruments(code),
+    direction       TEXT    NOT NULL CHECK (direction IN ('below','above')),
+    target          REAL    NOT NULL CHECK (target > 0),
+    note            TEXT,
+    active          INTEGER NOT NULL DEFAULT 1,
+    triggered_at    TEXT,
+    triggered_price REAL,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_active ON price_alerts(active, code);
+
+-- ---------- 日期提醒（财报/事件；到期后一次性推送）----------
+CREATE TABLE IF NOT EXISTS reminders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    due_date   TEXT    NOT NULL,              -- YYYY-MM-DD（本地时区）
+    code       TEXT,                          -- 可空：不绑定标的的通用提醒
+    note       TEXT    NOT NULL,
+    sent_at    TEXT,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(sent_at, due_date);
+
 -- 数据源分歧记录（交叉校验 >0.5% 时写入）
 CREATE TABLE IF NOT EXISTS source_conflicts (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,

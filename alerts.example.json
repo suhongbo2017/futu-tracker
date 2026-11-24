@@ -1,0 +1,23 @@
+{
+  "instruments": [
+    {
+      "code": "US.NFLX",
+      "name": "奈飞"
+    }
+  ],
+  "alerts": [
+    {
+      "code": "US.NFLX",
+      "direction": "below",
+      "target": 50,
+      "note": "示例：到价提醒"
+    }
+  ],
+  "reminders": [
+    {
+      "date": "2027-01-28",
+      "code": "US.NFLX",
+      "note": "示例：财报日提醒"
+    }
+  ]
+}

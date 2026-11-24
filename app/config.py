@@ -19,6 +19,8 @@ BRIEF_MINUTE = int(_env("FUTU_BRIEF_MINUTE", "30"))
 FEISHU_WEBHOOK = _env("FEISHU_WEBHOOK", "")
 FEISHU_SECRET = _env("FEISHU_SECRET", "")           # 可选：签名校验
 ALERT_ON_FAILURE = _env("FUTU_ALERT_ON_FAILURE", "1") == "1"
+PRICE_ALERTS_ENABLED = _env("FUTU_PRICE_ALERTS", "1") == "1"   # 价格提醒开关
+REMINDERS_ENABLED = _env("FUTU_REMINDERS", "1") == "1"          # 日期提醒开关
 
 # 数据源
 CROSS_CHECK_TOLERANCE_PCT = float(_env("FUTU_XCHECK_PCT", "0.5"))   # 双源价差告警阈值

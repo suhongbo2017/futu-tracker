@@ -1,6 +1,21 @@
 # futu-tracker 项目状态记录
 
-更新时间：2026-10-10
+更新时间：2026-11-24
+
+## 最新变更（未提交）
+
+### 观察池 + 价格提醒
+
+- 新增 `price_alerts` 表（一次性提醒，触发后置 `active=0` 并记录触发价）
+- 新增 `app/alerts.py`：纯函数 `evaluate()` + `format_triggered()` + `check_and_notify()`
+- `collect_quotes` 采集完成后自动评估提醒（盘中每 30 分钟），异常不影响采集
+- 新增 `scripts/watch.py` CLI：`add` / `alert` / `list` / `rm` / `check [--dry]`
+- 新增环境变量 `FUTU_PRICE_ALERTS`（默认开）
+- 新增 `scripts/watch.py load`：从 `alerts.json` 批量导入（幂等），观察池配置入库
+- 新增日期提醒（财报/事件）：`reminders` 表 + `FUTU_REMINDERS` 开关 + 调度器每小时检查
+- 新增 CLI：`remind` / `reminders` / `due [--dry]`
+- 新增 `tests/test_alerts.py`（9 例），全套测试 `41 passed`
+- 设计取舍：推送失败不置为已触发，下轮重试；成功才去激活，避免重复刷屏
 
 ## 当前版本
 

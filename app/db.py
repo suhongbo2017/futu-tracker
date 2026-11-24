@@ -158,6 +158,46 @@ def list_instruments(conn, active_only=True):
     return [dict(r) for r in conn.execute(sql + " ORDER BY code")]
 
 
+# ---------- 价格提醒 ----------
+def add_alert(conn, code, direction, target, note=None):
+    """新增一次性价格提醒。direction: below | above。"""
+    direction = (direction or "").strip().lower()
+    if direction not in ("below", "above"):
+        raise ValueError("direction 只能是 below 或 above")
+    if not target or float(target) <= 0:
+        raise ValueError("target 必须为正数")
+    ensure_instrument(conn, code)
+    cur = conn.execute(
+        "INSERT INTO price_alerts(code, direction, target, note) VALUES (?,?,?,?)",
+        (code, direction, float(target), note),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def list_alerts(conn, active_only=False):
+    sql = "SELECT * FROM price_alerts"
+    if active_only:
+        sql += " WHERE active=1"
+    return [dict(r) for r in conn.execute(sql + " ORDER BY active DESC, id")]
+
+
+def remove_alert(conn, alert_id):
+    cur = conn.execute("DELETE FROM price_alerts WHERE id=?", (alert_id,))
+    conn.commit()
+    return cur.rowcount
+
+
+def mark_alert_triggered(conn, alert_id, price):
+    conn.execute(
+        """UPDATE price_alerts
+              SET active=0, triggered_at=datetime('now'), triggered_price=?
+            WHERE id=?""",
+        (float(price), alert_id),
+    )
+    conn.commit()
+
+
 # ---------- quotes ----------
 def upsert_quote(conn, code, date, o, h, l, c, v, source, is_final=1):
     conn.execute(
@@ -234,3 +274,31 @@ def backup(dest_dir=None, keep=7, conn=None):
             pass
     return {"path": dest, "size": size, "removed": removed,
             "kept": len(files) - len(removed)}
+
+# ---------- 日期提醒 ----------
+def add_reminder(conn, due_date, note, code=None):
+    cur = conn.execute(
+        "INSERT INTO reminders(due_date, code, note) VALUES (?,?,?)",
+        (due_date, code, note),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def list_reminders(conn, pending_only=False):
+    sql = "SELECT * FROM reminders"
+    if pending_only:
+        sql += " WHERE sent_at IS NULL"
+    return [dict(r) for r in conn.execute(sql + " ORDER BY due_date, id")]
+
+
+def due_reminders(conn, date):
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM reminders WHERE sent_at IS NULL AND due_date<=? ORDER BY due_date, id",
+        (date,),
+    )]
+
+
+def mark_reminder_sent(conn, reminder_id):
+    conn.execute("UPDATE reminders SET sent_at=datetime('now') WHERE id=?", (reminder_id,))
+    conn.commit()

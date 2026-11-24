@@ -18,6 +18,7 @@ except Exception:                                  # pragma: no cover
     _NY = None
 
 from . import config, db, sources
+from . import alerts
 from .accounting import compute_positions, mark_to_market, portfolio_totals, cash_balance
 
 
@@ -129,8 +130,18 @@ def collect_quotes(conn):
     if skipped:
         msg += " | " + ",".join(skipped[:5])
     db.run_finish(conn, run_id, status, msg)
+
+    # 价格提醒：用本轮实时价评估（一次性触发；异常不影响采集结果）
+    prices = {}
+    for inst in insts:
+        q = quotes.get(inst["symbol"])
+        if q and q.get("last") is not None:
+            prices[inst["code"]] = q["last"]
+    alerts_result = alerts.check_and_notify(conn, prices)
+
     return {"status": status, "saved": saved, "skipped": skipped,
-            "conflicts": conflicts, "sources": used, "message": msg}
+            "conflicts": conflicts, "sources": used, "message": msg,
+            "alerts": alerts_result}
 
 
 def collect_history(conn):

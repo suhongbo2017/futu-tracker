@@ -29,7 +29,7 @@ from . import config, db
 from .accounting import compute_positions, mark_to_market, portfolio_totals
 from .collector import (collect_history, collect_quotes, snapshot, market_closed,
                         us_session_date, is_trading_day, ny_now)
-from . import notify
+from . import alerts, notify
 
 # --------------------------------------------------------------------------
 # 样式（护眼配色：米绿底 + 低饱和）
@@ -600,6 +600,7 @@ class Handler(BaseHTTPRequestHandler):
 def scheduler_loop(stop_evt):
     last_quote_min = None
     brief_retry_slot = None
+    last_reminder_slot = None
     while not stop_evt.is_set():
         try:
             now = dt.datetime.now()
@@ -617,6 +618,13 @@ def scheduler_loop(stop_evt):
                     print("[sched] quotes:", r.get("message"), flush=True)
                     if r.get("status") != "ok" and config.ALERT_ON_FAILURE:
                         notify.send_text(notify.build_failure_alert("collect_quotes", r.get("message", "")))
+                # 日期提醒（财报/事件）：BRIEF_HOUR 之后每小时检查一次（失败下小时重试）
+                reminder_slot = (now.date().isoformat(), now.hour)
+                if now.hour >= config.BRIEF_HOUR and reminder_slot != last_reminder_slot:
+                    last_reminder_slot = reminder_slot
+                    rr = alerts.check_reminders(conn)
+                    if rr.get("fired"):
+                        print("[sched] reminders:", rr.get("sent"), rr.get("detail"), flush=True)
                 # 每日备份（账本不可再生）：简报前一小时
                 backup_date = now.date().isoformat()
                 if now.hour == max(config.BRIEF_HOUR - 1, 0) and now.minute >= 30 \

@@ -28,10 +28,11 @@ app/
   sources.py     行情数据源（腾讯主 / 新浪备与历史日K）+ 双源交叉校验
   accounting.py  移动加权平均账务引擎
   collector.py   采集任务（实时快照 / 历史回填 / 组合快照）
+  alerts.py      价格提醒（一次性触发 + 飞书推送）
   web.py         Web 页面、JSON API 与内置调度器（仅标准库）
   notify.py      飞书推送（HMAC 加签）
   healthcheck.py 容器健康检查
-scripts/         从旧 stocks.txt 播种（seed_from_stocks_txt.py）
+scripts/         旧标的播种（seed_from_stocks_txt.py）、观察池与提醒 CLI（watch.py）
 tests/           单元测试（python -m pytest tests/ -q）
 ```
 
@@ -47,6 +48,7 @@ tests/           单元测试（python -m pytest tests/ -q）
 | `FUTU_BRIEF_HOUR` / `FUTU_BRIEF_MINUTE` | 简报发送时间（北京时间） | 7 / 30 |
 | `FUTU_XCHECK_PCT` | 双源价差告警阈值(%) | `0.5` |
 | `FUTU_ALERT_ON_FAILURE` | 采集/推送失败是否告警 | `1` |
+| `FUTU_PRICE_ALERTS` | 价格提醒开关 | `1` |
 | `FUTU_HISTORY_BARS` | 每票回填日K根数 | `400` |
 | `FUTU_BACKUP_KEEP` | 保留最近备份份数 | `7` |
 
@@ -89,6 +91,41 @@ docker compose up -d --build     # 自动重建容器，./data 数据卷与 .env
 - **新增标的**：记账页顶部「➕ 新增标的」可主动注册（代码 + 可选名称；采集到行情后自动补真实名称）；也可直接在记账单「标的」框输入新代码提交，自动注册并记账。
 - **记账**：买入/卖出/分红（DIV）/费用（FEE）/拆合股（ADJ），冲正纠错；卖出不允许超过当前持仓（不支持卖空）。价格、数量、手续费必须是有限数字，成交时间会校验为真实日期时间。
 - **行情完整性**：如果部分持仓没有价格，总览与简报会明确提示，汇总市值和浮盈按已有行情计算；快照会统一使用同一估值日，缺行情时标记为部分完成。
+
+## 观察池与价格提醒
+
+不持仓也可以把标的放进观察池，行情会随持仓一起采集；到价后通过飞书推送一次性提醒。
+
+```bash
+python -m scripts.watch add US.SIMO --name 慧荣科技     # 加入观察池（进入行情采集）
+python -m scripts.watch alert US.SIMO below 123 --note "第一档加仓"
+python -m scripts.watch alert US.NFLX below 50
+python -m scripts.watch list                            # 查看全部提醒与状态
+python -m scripts.watch check --dry                     # 用库内最新价试算，不推送
+python -m scripts.watch check                           # 立即评估并推送
+python -m scripts.watch remind 2026-12-02 "CRM 财报" --code US.CRM   # 日期提醒（财报/事件）
+python -m scripts.watch reminders                        # 列出日期提醒
+python -m scripts.watch due --date 2026-12-02 --dry      # 演练当天会推送什么
+python -m scripts.watch rm 3                            # 删除提醒
+python -m scripts.watch load alerts.json                # 批量导入（幂等，可反复执行）
+```
+
+本地配置文件为仓库根目录的 `alerts.json`（已加入 `.gitignore`，**不会提交到公开仓库**）。首次使用从示例复制：
+
+```bash
+cp alerts.example.json alerts.json   # 然后按自己的标的/档位修改
+```
+
+改动后重跑一次 `load` 即可（幂等）。
+
+日期提醒（`reminders`）：到 `due_date` 当天、北京时间 `FUTU_BRIEF_HOUR` 之后每小时检查一次，推送成功后标记已发（逾期未发的会补发）。开关 `FUTU_REMINDERS=0`。
+
+规则：
+
+- 方向 `below` = 跌到目标价或更低，`above` = 涨到目标价或更高；**等于目标价即触发**。
+- **一次性**：触发并推送成功后自动置为“已触发”并记录触发价，不会重发；需要再次提醒就重新 `alert`。
+- **失败不丢**：飞书推送失败时保持监控状态，下一轮采集（30 分钟）自动重试。
+- 评估挂在 `collect_quotes` 之后，美股盘中每 30 分钟检查一次；`FUTU_PRICE_ALERTS=0` 可整体关闭。
 
 ## 开发与测试
 
